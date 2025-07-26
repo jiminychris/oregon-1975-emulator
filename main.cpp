@@ -945,8 +945,8 @@ lexeme *InputStatement(parser *Parser)
 {
     lexeme *Input = Match(Parser, token_type_INPUT);
     lexeme *Id = Match(Parser, token_type_ID);
-    Input->String = Input->String;
-    Input->IsString = Input->IsString;
+    Input->String = Id->String;
+    Input->IsString = Id->IsString;
     return Input;
 }
 
