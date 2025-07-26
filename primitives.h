@@ -9,3 +9,6 @@
 #define s16 int16_t
 #define s32 int32_t
 #define s64 int64_t
+
+#define r32 float
+#define r64 double
