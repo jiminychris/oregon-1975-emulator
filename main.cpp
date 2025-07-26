@@ -59,6 +59,7 @@ struct string_reference
     x(token_type, REM)       \
     x(token_type, PRINT)     \
     x(token_type, LIN)     \
+    x(token_type, TAB)     \
     x(token_type, INT)     \
     x(token_type, RND)     \
     x(token_type, TIM)     \
@@ -121,7 +122,7 @@ struct lexeme
     token_type Type;
     u32 LineNumber;
     u32 BasicLineNumber;
-    u32 Integer;
+    s32 Integer;
     char Character;
     r32 Real;
     u8 IsString;
@@ -163,8 +164,27 @@ struct environment
     string_reference VariableNames[64];
     lexeme VariableValues[64];
     size_t VariableCount;
+    basic_line Stack[64];
+    size_t StackLength;
     parser Parser;
 };
+
+struct temporary_memory
+{
+    size_t AllocatedBefore;
+};
+
+temporary_memory BeginTemporaryMemory(memory_arena *Arena)
+{
+    temporary_memory Result;
+    Result.AllocatedBefore = Arena->Allocated;
+    return Result;
+}
+
+void EndTemporaryMemory(memory_arena *Arena, temporary_memory TemporaryMemory)
+{
+    Arena->Allocated = TemporaryMemory.AllocatedBefore;
+}
 
 string_reference BeginString(memory_arena *Arena)
 {
@@ -184,6 +204,7 @@ size_t AllocateString(memory_arena *Arena, size_t Size, char **Dest)
 }
 
 lexeme *Expression(parser *Parser);
+lexeme *EvaluateExpression(environment *Environment, lexeme *Expr, lexeme *Value);
 
 lexeme LexemeEOF = {token_type_EOF};
 
@@ -378,7 +399,7 @@ u32 CheckCommand(basic_line *Line, buffer *Buffer, const char *String, basic_com
 #define CHECK_COMMAND(Line, Buffer, Command) CheckCommand(Line, Buffer, #Command, basic_command_##Command)
 #endif
 
-lexeme *LookupVariable(environment *Environment, lexeme *Lexeme)
+lexeme *FindVariable(environment *Environment, lexeme *Lexeme)
 {
     lexeme *Result = 0;
     for (s32 VariableIndex = 0; VariableIndex < Environment->VariableCount; ++VariableIndex)
@@ -388,18 +409,45 @@ lexeme *LookupVariable(environment *Environment, lexeme *Lexeme)
             Result = Environment->VariableValues + VariableIndex;
         }
     }
-    if (!Result && !Lexeme->IsString)
+    return Result;
+}
+
+lexeme *LookupVariable(environment *Environment, lexeme *Lexeme)
+{
+    lexeme *Result = FindVariable(Environment, Lexeme);
+    if (!Result)
     {
-        if (ArrayCount(Environment->VariableValues) <= Environment->VariableCount)
-        {
-            Panic(Lexeme, "Unable to allocate a new integer.");
-        }
-        Environment->VariableNames[Environment->VariableCount] = Lexeme->String;
-        Result = Environment->VariableValues + Environment->VariableCount;
-        Environment->VariableCount += 1;
-        Result->Type = token_type_INTEGER;
+        Panic(Lexeme, "Cannot find variable %.*s", Lexeme->String.Length, Lexeme->String.Memory);
     }
     return Result;
+}
+
+lexeme *DeclareVariable(environment *Environment, lexeme *Lexeme)
+{
+    lexeme *Variable = FindVariable(Environment, Lexeme);
+    if (Variable)
+    {
+        Panic(Lexeme, "Double declaration of %.*s", Lexeme->String.Length, Lexeme->String.Memory);
+    }
+    if (ArrayCount(Environment->VariableValues) <= Environment->VariableCount)
+    {
+        Panic(Lexeme, "Unable to allocate memory for a new variable.");
+    }
+    Environment->VariableNames[Environment->VariableCount] = Lexeme->String;
+    lexeme *Result = Environment->VariableValues + Environment->VariableCount;
+    Environment->VariableCount += 1;
+    Result->Type = Lexeme->IsString ? token_type_STRING : token_type_INTEGER;
+    return Result;
+}
+
+lexeme *LookupOrDeclareVariable(environment *Environment, lexeme *Lexeme)
+{
+    lexeme *Variable = FindVariable(Environment, Lexeme);
+    if (!Variable)
+    {
+        Variable = DeclareVariable(Environment, Lexeme);
+    }
+    return Variable;
 }
 
 #if 0
@@ -605,6 +653,7 @@ lexeme *LexAlpha(parser *Parser)
     }
     else if ((Lexeme = LEX_COMMAND(Parser, Buffer, PRINT))) {}
     else if ((Lexeme = LEX_COMMAND(Parser, Buffer, LIN))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, TAB))) {}
     else if ((Lexeme = LEX_COMMAND(Parser, Buffer, INT))) {}
     else if ((Lexeme = LEX_COMMAND(Parser, Buffer, RND))) {}
     else if ((Lexeme = LEX_COMMAND(Parser, Buffer, TIM))) {}
@@ -839,7 +888,16 @@ lexeme *Lin(parser *Parser)
     return Lin;
 }
 
-lexeme *Expression(parser *Parser)
+lexeme *Tab(parser *Parser)
+{
+    lexeme *Tab = Match(Parser, token_type_TAB);
+    Match(Parser, token_type_OPAREN);
+    Tab->Left = Expression(Parser);
+    Match(Parser, token_type_CPAREN);
+    return Tab;
+}
+
+lexeme *SimpleExpression(parser *Parser)
 {
     lexeme *Result = 0;
     lexeme *Peek = PeekLex(Parser);
@@ -869,6 +927,10 @@ lexeme *Expression(parser *Parser)
             {
                 Result = Lin(Parser);
             } break;
+            case token_type_TAB:
+            {
+                Result = Tab(Parser);
+            } break;
             case token_type_INT:
             {
                 Result = Int(Parser);
@@ -886,14 +948,23 @@ lexeme *Expression(parser *Parser)
                 Panic(Peek, "Invalid expression LHS %s\n", TokenTypeNames[Peek->Type]);
             }
         }
+    }
+    return Result;
+}
 
-        if (IsBinaryOperator(PeekLex(Parser)))
-        {
-            lexeme *LHS = Result;
-            Result = GetLex(Parser);
-            Result->Left = LHS;
-            Result->Right = Expression(Parser);
-        }
+lexeme *Expression(parser *Parser)
+{
+    lexeme *Result = SimpleExpression(Parser);
+    while (IsBinaryOperator(PeekLex(Parser)))
+    {
+        lexeme *LHS = Result;
+        Result = GetLex(Parser);
+        Result->Left = LHS;
+        Result->Right = SimpleExpression(Parser);
+    }
+    if (!Result)
+    {
+        Panic(Parser, "Expected expression");
     }
 
     return Result;
@@ -912,6 +983,10 @@ lexeme *PrintArgs(parser *Parser)
             lexeme *LHS = Parent->Right;
             Parent = Parent->Right = Match(Parser, Peek->Type);
             Parent->Left = LHS;
+        }
+        else
+        {
+            break;
         }
     }
     return Sentinel.Right;
@@ -1140,6 +1215,10 @@ lexeme *EvaluateEquality(environment *Environment, lexeme *LHS, lexeme *RHS, lex
             {
                 Result.Integer = Equals(LHS->String, RHS->String);
             } break;
+            case token_type_INTEGER:
+            {
+                Result.Integer = LHS->Integer == RHS->Integer;
+            } break;
             default:
             {
                 Panic(LHS, "Cannot compare values of type %s", TokenTypeNames[LHS->Type]);
@@ -1151,6 +1230,35 @@ lexeme *EvaluateEquality(environment *Environment, lexeme *LHS, lexeme *RHS, lex
         Panic(LHS, "Cannot compare values with different types %s and %s", TokenTypeNames[LHS->Type], TokenTypeNames[RHS->Type]);
     }
     *Output = Result;
+    return Output;
+}
+
+lexeme *BeginIntegerOperation(environment *Environment, lexeme *Operator, lexeme *Output, lexeme *LHS, lexeme *RHS)
+{
+    LHS->Type = token_type_INTEGER;
+    LHS->Integer = 0;
+    if (Operator->Left)
+    {
+        EvaluateExpression(Environment, Operator->Left, LHS);
+    }
+    EvaluateExpression(Environment, Operator->Right, RHS);
+    if (LHS->Type != token_type_INTEGER || RHS->Type != token_type_INTEGER)
+    {
+        Panic(Operator, "Can't combine non-integer values %s and %s", TokenTypeNames[LHS->Type], TokenTypeNames[RHS->Type]);
+    }
+    Output->Type = token_type_INTEGER;
+    return Output;
+}
+
+lexeme *BeginIntegerComparison(environment *Environment, lexeme *Operator, lexeme *Output, lexeme *LHS, lexeme *RHS)
+{
+    EvaluateExpression(Environment, Operator->Left, LHS);
+    EvaluateExpression(Environment, Operator->Right, RHS);
+    if (LHS->Type != token_type_INTEGER || RHS->Type != token_type_INTEGER)
+    {
+        Panic(Operator, "Can't compare non-integer values %s and %s", TokenTypeNames[LHS->Type], TokenTypeNames[LHS->Type]);
+    }
+    Output->Type = token_type_INTEGER;
     return Output;
 }
 
@@ -1195,6 +1303,27 @@ lexeme *EvaluateExpression(environment *Environment, lexeme *Expr, lexeme *Value
                 Value->String.Length += StringAppend(StringArena, '\n');
             }
         } break;
+        case token_type_TAB:
+        {
+            EvaluateExpression(Environment, Expr->Left, Value);
+            ToInteger(Environment, Value, Value);
+            Value->Type = token_type_STRING;
+            Value->String = BeginString(StringArena);
+            while (Value->Integer--)
+            {
+                Value->String.Length += StringAppend(StringArena, ' ');
+            }
+        } break;
+        case token_type_RND:
+        {
+            Value->Type = token_type_REAL;
+            Value->Real = ((r32)rand() / RAND_MAX) * 0.999f;
+        } break;
+        case token_type_INT:
+        {
+            EvaluateExpression(Environment, Expr->Left, Value);
+            ToInteger(Environment, Value, Value);
+        } break;
         case token_type_STRING:
         case token_type_INTEGER:
         {
@@ -1212,30 +1341,43 @@ lexeme *EvaluateExpression(environment *Environment, lexeme *Expr, lexeme *Value
         } break;
         case token_type_GTE:
         {
-            EvaluateExpression(Environment, Expr->Left, &LHS);
-            EvaluateExpression(Environment, Expr->Right, &RHS);
-            if (LHS.Type != token_type_INTEGER || RHS.Type != token_type_INTEGER)
-            {
-                Panic(Expr, "Can't compare non-integer values %s and %s", TokenTypeNames[LHS.Type], TokenTypeNames[RHS.Type]);
-            }
-            Value->Type = token_type_INTEGER;
+            BeginIntegerComparison(Environment, Expr, Value, &LHS, &RHS);
             Value->Integer = LHS.Integer >= RHS.Integer;
+        } break;
+        case token_type_GT:
+        {
+            BeginIntegerComparison(Environment, Expr, Value, &LHS, &RHS);
+            Value->Integer = LHS.Integer > RHS.Integer;
+        } break;
+        case token_type_LTE:
+        {
+            BeginIntegerComparison(Environment, Expr, Value, &LHS, &RHS);
+            Value->Integer = LHS.Integer <= RHS.Integer;
+        } break;
+        case token_type_LT:
+        {
+            BeginIntegerComparison(Environment, Expr, Value, &LHS, &RHS);
+            Value->Integer = LHS.Integer < RHS.Integer;
+        } break;
+        case token_type_PLUS:
+        {
+            BeginIntegerOperation(Environment, Expr, Value, &LHS, &RHS);
+            Value->Integer = LHS.Integer + RHS.Integer;
         } break;
         case token_type_MINUS:
         {
-            LHS.Type = token_type_INTEGER;
-            LHS.Integer = 0;
-            if (Expr->Left)
-            {
-                EvaluateExpression(Environment, Expr->Left, &LHS);
-            }
-            EvaluateExpression(Environment, Expr->Right, &RHS);
-            if (LHS.Type != token_type_INTEGER || RHS.Type != token_type_INTEGER)
-            {
-                Panic(Expr, "Can't subtract non-integer values %s and %s", TokenTypeNames[LHS.Type], TokenTypeNames[RHS.Type]);
-            }
-            Value->Type = token_type_INTEGER;
+            BeginIntegerOperation(Environment, Expr, Value, &LHS, &RHS);
             Value->Integer = LHS.Integer - RHS.Integer;
+        } break;
+        case token_type_STAR:
+        {
+            BeginIntegerOperation(Environment, Expr, Value, &LHS, &RHS);
+            Value->Integer = LHS.Integer * RHS.Integer;
+        } break;
+        case token_type_SLASH:
+        {
+            BeginIntegerOperation(Environment, Expr, Value, &LHS, &RHS);
+            Value->Integer = LHS.Integer / RHS.Integer;
         } break;
         default:
         {
@@ -1247,11 +1389,47 @@ lexeme *EvaluateExpression(environment *Environment, lexeme *Expr, lexeme *Value
 
 lexeme *ToString(environment *Environment, lexeme *Value, lexeme *String)
 {
+    memory_arena *Arena = &Environment->Parser.StringArena;
     switch (Value->Type)
     {
         case token_type_STRING:
         {
             *String = *Value;
+        } break;
+        case token_type_INTEGER:
+        {
+            lexeme Temp;
+            Temp.Type = token_type_STRING;
+            Temp.String = BeginString(Arena);
+            Temp.Integer = Value->Integer;
+            if (Temp.Integer == 0)
+            {
+                Temp.String.Length += StringAppend(Arena, '0');
+            }
+            else
+            {
+                if (Temp.Integer < 0)
+                {
+                    Temp.String.Length += StringAppend(Arena, '-');
+                    Temp.Integer *= -1;
+                }
+                string_reference Digits = BeginString(Arena);
+                while (Temp.Integer)
+                {
+                    Digits.Length += StringAppend(Arena, '0' + (Temp.Integer % 10));
+                    Temp.Integer /= 10;
+                }
+                Temp.String.Length += Digits.Length;
+                char *Head = Digits.Memory;
+                char *Tail = Head + Digits.Length - 1;
+                while (Head < Tail)
+                {
+                    char Temp = *Tail;
+                    *Tail-- = *Head;
+                    *Head++ = Temp;
+                }
+            }
+            *String = Temp;
         } break;
         default:
         {
@@ -1297,6 +1475,7 @@ void EvaluatePrint(environment *Environment, lexeme *Print)
         {
             lexeme Value;
             EvaluateExpression(Environment, Expr, &Value);
+            temporary_memory TemporaryMemory = BeginTemporaryMemory(&Environment->Parser.StringArena);
             ToString(Environment, &Value, &Value);
             if (Value.Type != token_type_STRING)
             {
@@ -1307,6 +1486,7 @@ void EvaluatePrint(environment *Environment, lexeme *Print)
                 putchar(Prefix);
             }
             printf("%.*s", Value.String.Length, Value.String.Memory);
+            EndTemporaryMemory(&Environment->Parser.StringArena, TemporaryMemory);
         }
         Prefix = NextPrefix;
         Args = Args->Right;
@@ -1319,14 +1499,7 @@ void EvaluatePrint(environment *Environment, lexeme *Print)
 
 void EvaluateDim(environment *Environment, lexeme *Lexeme)
 {
-    if (LookupVariable(Environment, Lexeme))
-    {
-        Panic(Lexeme, "Attempted to DIM already DIM'd string %.*s", Lexeme->String.Length, Lexeme->String.Memory);
-    }
-    u32 VariableIndex = Environment->VariableCount++;
-    Environment->VariableNames[VariableIndex] = Lexeme->String;
-    lexeme *Value = Environment->VariableValues + VariableIndex;
-    Value->Type = token_type_STRING;
+    lexeme *Value = DeclareVariable(Environment, Lexeme);
     Value->IsString = 1;
     Value->Integer = Lexeme->Integer;
     size_t BytesAllocated = AllocateString(&Environment->Parser.StringArena, Value->Integer, &Value->String.Memory);
@@ -1339,7 +1512,7 @@ void EvaluateDim(environment *Environment, lexeme *Lexeme)
 void EvaluateInput(environment *Environment, lexeme *Lexeme)
 {
     printf("? ");
-    lexeme *Value = LookupVariable(Environment, Lexeme);
+    lexeme *Value = LookupOrDeclareVariable(Environment, Lexeme);
     char Char;
     if (Lexeme->IsString)
     {
@@ -1361,15 +1534,27 @@ void EvaluateInput(environment *Environment, lexeme *Lexeme)
     else
     {
         s32 Integer = 0;
-        while ((Char = getchar()) != '\n')
+        s32 Multiplier = 1;
+        Char = getchar();
+        while (IsIntralineWhitespace(Char))
+        {
+            Char = getchar();
+        }
+        if (Char == '-')
+        {
+            Multiplier = -1;
+            Char = getchar();
+        }
+        while (Char != '\n')
         {
             if (isdigit(Char))
             {
                 Integer = 10 * Integer + Char - '0';
             }
+            Char = getchar();
         }
         Value->Type = token_type_INTEGER;
-        Value->Integer = Integer;
+        Value->Integer = Multiplier * Integer;
     }
 }
 
@@ -1388,7 +1573,23 @@ void EvaluateGoto(environment *Environment, lexeme *Lexeme)
 {
     if (Lexeme->Left)
     {
-        Panic(Lexeme, "goto not fully implemented");
+        lexeme *Cons = Lexeme->Left;
+        lexeme Choice;
+        EvaluateExpression(Environment, Cons->Left, &Choice);
+        u32 ChoiceIndex = Choice.Integer;
+        if (ChoiceIndex < 1)
+        {
+            Panic(Lexeme, "Cannot GOTO/OF with branch choice %d", ChoiceIndex);
+        }
+        while (ChoiceIndex)
+        {
+            Cons = Cons->Right;
+            if (!Cons)
+            {
+                Panic(Lexeme, "Cannot GOTO/OF with branch choice %d with only %d choice(s)", Choice.Integer, Choice.Integer - ChoiceIndex);
+            }
+            ChoiceIndex--;
+        }
     }
     else
     {
@@ -1396,9 +1597,38 @@ void EvaluateGoto(environment *Environment, lexeme *Lexeme)
     }
 }
 
+void PushStack(environment *Environment, lexeme *Return)
+{
+    if (ArrayCount(Environment->Stack) <= Environment->StackLength)
+    {
+        Panic(Return, "Stack overflow");
+    }
+    Environment->Stack[Environment->StackLength++] = {Return};
+}
+
+lexeme *PopStack(environment *Environment, lexeme *Return)
+{
+    if (!Environment->StackLength)
+    {
+        Panic(Return, "Stack underflow");
+    }
+    return Environment->Stack[--Environment->StackLength].Lexeme;
+}
+
+void EvaluateGosub(environment *Environment, lexeme *Lexeme)
+{
+    PushStack(Environment, Lexeme->Right);
+    EvaluateGoto(Environment, Lexeme);
+}
+
+void EvaluateReturn(environment *Environment, lexeme *Lexeme)
+{
+    Environment->Goto = PopStack(Environment, Lexeme);
+}
+
 void EvaluateLetAssignment(environment *Environment, lexeme *Id, lexeme *Value)
 {
-    lexeme *Variable = LookupVariable(Environment, Id);
+    lexeme *Variable = LookupOrDeclareVariable(Environment, Id);
     if (Id->Right)
     {
         EvaluateExpression(Environment, Id->Right, Variable);
@@ -1418,7 +1648,8 @@ void EvaluateLet(environment *Environment, lexeme *Lexeme)
 
 void Evaluate(environment *Environment, lexeme *Lexeme)
 {
-    while (Lexeme)
+    u8 Running = 1;
+    while (Lexeme && Running)
     {
 #if DEBUG_EVALUATE_STATEMENT
         printf("%s\n", TokenTypeNames[Lexeme->Type]);
@@ -1446,9 +1677,22 @@ void Evaluate(environment *Environment, lexeme *Lexeme)
             {
                 EvaluateGoto(Environment, Lexeme);
             } break;
+            case token_type_GOSUB:
+            {
+                EvaluateGosub(Environment, Lexeme);
+            } break;
+            case token_type_RETURN:
+            {
+                EvaluateReturn(Environment, Lexeme);
+            } break;
             case token_type_LET:
             {
                 EvaluateLet(Environment, Lexeme);
+            } break;
+            case token_type_STOP:
+            case token_type_END:
+            {
+                Running = 0;
             } break;
             default:
             {
@@ -1468,6 +1712,7 @@ void Evaluate(environment *Environment, lexeme *Lexeme)
 
 int main(int ArgCount, char *Args[])
 {
+    setvbuf(stdout, NULL, _IONBF, 0);
     char StringMemory[65536];
     environment Environment = {};
     Environment.Parser.StringArena.Memory = StringMemory;
