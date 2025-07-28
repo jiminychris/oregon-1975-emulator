@@ -100,6 +100,7 @@ precedence_direction PrecedenceDirections[] =
     x(token_type, OF, None)                                                  \
     x(token_type, OR, Or)                                                  \
     x(token_type, AND, And)                                                 \
+    x(token_type, NOT, Not)                                                 \
     x(token_type, INTEGER, None)                                             \
     x(token_type, BOOLEAN, None)                                             \
     x(token_type, REAL, None)                                                \
@@ -849,6 +850,7 @@ lexeme *LexAlpha(parser *Parser)
     else if ((Lexeme = LEX_COMMAND(Parser, Buffer, OF))) {}
     else if ((Lexeme = LEX_COMMAND(Parser, Buffer, OR))) {}
     else if ((Lexeme = LEX_COMMAND(Parser, Buffer, AND))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, NOT))) {}
     else if ((Lexeme = LEX_COMMAND(Parser, Buffer, ENTER))) {}
     else if ((Lexeme = LEX_COMMAND(Parser, Buffer, GOSUB))) {}
     else if ((Lexeme = LEX_COMMAND(Parser, Buffer, GOTO))) {}
@@ -1009,38 +1011,6 @@ lexeme *Match(parser *Parser, token_type Type)
     return Lexeme;
 }
 
-u8 IsPotentialUnaryOperator(lexeme *Lexeme)
-{
-    return (
-        Lexeme->Type == token_type_MINUS
-        );
-}
-
-u8 IsUnaryOperator(lexeme *Lexeme)
-{
-    return (
-        Lexeme->Type == token_type_NEGATE
-        );
-}
-
-u8 IsBinaryOperator(lexeme *Lexeme)
-{
-    return (
-        Lexeme->Type == token_type_PLUS ||
-        Lexeme->Type == token_type_MINUS ||
-        Lexeme->Type == token_type_STAR ||
-        Lexeme->Type == token_type_SLASH ||
-        Lexeme->Type == token_type_CARET ||
-        Lexeme->Type == token_type_LT ||
-        Lexeme->Type == token_type_LTE ||
-        Lexeme->Type == token_type_GT ||
-        Lexeme->Type == token_type_GTE ||
-        Lexeme->Type == token_type_OR ||
-        Lexeme->Type == token_type_AND ||
-        Lexeme->Type == token_type_EQ
-        );
-}
-
 lexeme *Int(parser *Parser)
 {
     lexeme *Int = Match(Parser, token_type_INT);
@@ -1104,6 +1074,40 @@ lexeme *Pop(lexeme_stack *Stack, lexeme **Lexeme)
     }
     *Lexeme = Stack->Stack[--Stack->Count];
     return *Lexeme;
+}
+
+u8 IsPotentialUnaryOperator(lexeme *Lexeme)
+{
+    return (
+        Lexeme->Type == token_type_MINUS ||
+        Lexeme->Type == token_type_NOT
+        );
+}
+
+u8 IsUnaryOperator(lexeme *Lexeme)
+{
+    return (
+        Lexeme->Type == token_type_NEGATE ||
+        Lexeme->Type == token_type_NOT
+        );
+}
+
+u8 IsBinaryOperator(lexeme *Lexeme)
+{
+    return (
+        Lexeme->Type == token_type_PLUS ||
+        Lexeme->Type == token_type_MINUS ||
+        Lexeme->Type == token_type_STAR ||
+        Lexeme->Type == token_type_SLASH ||
+        Lexeme->Type == token_type_CARET ||
+        Lexeme->Type == token_type_LT ||
+        Lexeme->Type == token_type_LTE ||
+        Lexeme->Type == token_type_GT ||
+        Lexeme->Type == token_type_GTE ||
+        Lexeme->Type == token_type_OR ||
+        Lexeme->Type == token_type_AND ||
+        Lexeme->Type == token_type_EQ
+        );
 }
 
 lexeme *SimpleExpression(parser *Parser, lexeme_stack *OperatorStack)
@@ -1787,6 +1791,11 @@ lexeme *EvaluateExpression(environment *Environment, lexeme *Expr, lexeme *Value
             s32 Integer = ToBoolean(Environment, EvaluateExpression(Environment, Expr->Left, &LHS), Value)->Integer && ToBoolean(Environment, EvaluateExpression(Environment, Expr->Right, &RHS), Value)->Integer;
             Assert(Integer == Value->Integer);
         } break;
+        case token_type_NOT:
+        {
+            ToBoolean(Environment, EvaluateExpression(Environment, Expr->Right, &LHS), Value);
+            Value->Integer = !Value->Integer;
+        } break;
         case token_type_PLUS:
         case token_type_MINUS:
         case token_type_STAR:
@@ -1974,9 +1983,17 @@ size_t RenderExpression(lexeme *Expr, memory_arena *Arena)
             } break;
             default:
             {
-                Result += StringAppend(Arena, ' ');
+                s32 IsUnary = IsUnaryOperator(Expr);
+                s32 IsBinary = IsBinaryOperator(Expr);
+                if (IsBinary)
+                {
+                    Result += StringAppend(Arena, ' ');
+                }
                 Result += StringAppend(Arena, (char*)TokenTypeNames[Expr->Type]);
-                Result += StringAppend(Arena, ' ');
+                if (IsBinary || IsUnary)
+                {
+                    Result += StringAppend(Arena, ' ');
+                }
             } break;
         }
         Parens = RightBalance;
@@ -2508,6 +2525,9 @@ int Test(environment *Environment)
     int Result = 0;
     Result += EXPRESSION_TEST(Environment, "0", "0", 0);
     Result += EXPRESSION_TEST(Environment, "1", "1", 1);
+    Result += EXPRESSION_TEST(Environment, "NOT 1", "(NOT 1)", !1);
+    Result += EXPRESSION_TEST(Environment, "NOT 0", "(NOT 0)", !0);
+    Result += EXPRESSION_TEST(Environment, "NOT -1", "(NOT (-1))", !-1);
     Result += EXPRESSION_TEST(Environment, "0 OR 0", "(0 OR 0)", 0 || 0);
     Result += EXPRESSION_TEST(Environment, "0 OR 1", "(0 OR 1)", 0 || 1);
     Result += EXPRESSION_TEST(Environment, "1 OR 0", "(1 OR 0)", 1 || 0);
