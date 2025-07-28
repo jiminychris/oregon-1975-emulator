@@ -11,12 +11,12 @@
 #include "primitives.h"
 
 #define RUN_TESTS 1
+#define PRINT_SUCCESSFUL_TESTS 0
 #define STOP_AFTER_TESTS 0
 #define DEBUG_LEXER 0
 #define DEBUG_STATEMENT 0
 #define DEBUG_EVALUATE_STATEMENT 0
 #define DEBUG_EVAL_IF 0
-#define PRINT_SUCCESSFUL_TESTS 0
 
 #define ArrayCount(Array) (sizeof(Array) / sizeof(Array[0]))
 #define Assert(Expr) {if(!(Expr)) int __AssertInt = *((volatile int *)0);}
@@ -1782,6 +1782,11 @@ lexeme *EvaluateExpression(environment *Environment, lexeme *Expr, lexeme *Value
             s32 Integer = ToBoolean(Environment, EvaluateExpression(Environment, Expr->Left, &LHS), Value)->Integer || ToBoolean(Environment, EvaluateExpression(Environment, Expr->Right, &RHS), Value)->Integer;
             Assert(Integer == Value->Integer);
         } break;
+        case token_type_AND:
+        {
+            s32 Integer = ToBoolean(Environment, EvaluateExpression(Environment, Expr->Left, &LHS), Value)->Integer && ToBoolean(Environment, EvaluateExpression(Environment, Expr->Right, &RHS), Value)->Integer;
+            Assert(Integer == Value->Integer);
+        } break;
         case token_type_PLUS:
         case token_type_MINUS:
         case token_type_STAR:
@@ -1969,7 +1974,9 @@ size_t RenderExpression(lexeme *Expr, memory_arena *Arena)
             } break;
             default:
             {
+                Result += StringAppend(Arena, ' ');
                 Result += StringAppend(Arena, (char*)TokenTypeNames[Expr->Type]);
+                Result += StringAppend(Arena, ' ');
             } break;
         }
         Parens = RightBalance;
@@ -2450,7 +2457,7 @@ int ExpressionTest(environment *Environment, string_reference ExpressionString, 
     int Result = 0;
     lexeme Value;
     string_reference Actual = ParseTest(Environment, ExpressionString, &Value);
-    if (Equals(Expected, Actual) && Value.Type == token_type_INTEGER && Value.Integer == ExpectedValue)
+    if (Equals(Expected, Actual) && (Value.Type == token_type_BOOLEAN || Value.Type == token_type_INTEGER) && Value.Integer == ExpectedValue)
     {
 #if PRINT_SUCCESSFUL_TESTS
         printf("Expecting: %.*s=%d . . . ", Expected.Length, Expected.Memory, ExpectedValue);
@@ -2501,6 +2508,16 @@ int Test(environment *Environment)
     int Result = 0;
     Result += EXPRESSION_TEST(Environment, "0", "0", 0);
     Result += EXPRESSION_TEST(Environment, "1", "1", 1);
+    Result += EXPRESSION_TEST(Environment, "0 OR 0", "(0 OR 0)", 0 || 0);
+    Result += EXPRESSION_TEST(Environment, "0 OR 1", "(0 OR 1)", 0 || 1);
+    Result += EXPRESSION_TEST(Environment, "1 OR 0", "(1 OR 0)", 1 || 0);
+    Result += EXPRESSION_TEST(Environment, "1 OR 1", "(1 OR 1)", 1 || 1);
+    Result += EXPRESSION_TEST(Environment, "0 AND 0", "(0 AND 0)", 0 && 0);
+    Result += EXPRESSION_TEST(Environment, "0 AND 1", "(0 AND 1)", 0 && 1);
+    Result += EXPRESSION_TEST(Environment, "1 AND 0", "(1 AND 0)", 1 && 0);
+    Result += EXPRESSION_TEST(Environment, "1 AND 1", "(1 AND 1)", 1 && 1);
+    Result += EXPRESSION_TEST(Environment, "1 AND 1 OR 1", "((1 AND 1) OR 1)", 1 && 1 || 1);
+    Result += EXPRESSION_TEST(Environment, "1 OR 1 AND 1", "(1 OR (1 AND 1))", 1 || 1 && 1);
     Result += EXPRESSION_TEST(Environment, "1+2*3+4", "((1+(2*3))+4)", 1+2*3+4);
     Result += EXPRESSION_TEST(Environment, "1*2+3*4", "((1*2)+(3*4))", 1*2+3*4);
     Result += EXPRESSION_TEST(Environment, "1*2=3*4", "((1*2)=(3*4))", 1*2==3*4);
