@@ -3,18 +3,26 @@
 #include <ctype.h>
 #include <stdarg.h>
 #include <string.h>
+#include <math.h>
 
 #include "primitives.h"
 
+#define RUN_TESTS 1
 #define DEBUG_LEXER 0
 #define DEBUG_STATEMENT 0
 #define DEBUG_EVALUATE_STATEMENT 0
 
 #define ArrayCount(Array) (sizeof(Array) / sizeof(Array[0]))
+#define Assert(Expr) {if(!(Expr)) int __AssertInt = *((volatile int *)0);}
 
-u32 Min(u32 A, u32 B)
+s32 Min(s32 A, s32 B)
 {
     return A < B ? A : B;
+}
+
+s32 Max(s32 A, s32 B)
+{
+    return A > B ? A : B;
 }
 
 struct string_reference
@@ -23,61 +31,97 @@ struct string_reference
     char *Memory;
 };
 
-#define CREATE_ENUM(Prefix, Name) Prefix##_##Name,
-#define CREATE_STRING(Prefix, Name) #Name,
+#define STRING_REFERENCE(StringLiteral) {sizeof (StringLiteral) - 1, (char*)(StringLiteral)}
+
+enum operator_precedence
+{
+    operator_precedence_None,
+    operator_precedence_Or,
+    operator_precedence_And,
+    operator_precedence_Not,
+    operator_precedence_Comparison,
+    operator_precedence_AddSub,
+    operator_precedence_MulDiv,
+    operator_precedence_Unary,
+    operator_precedence_Exponent,
+};
+
+enum precedence_direction
+{
+    precedence_direction_RightToLeft = -1,
+    precedence_direction_LeftToRight = 1,
+};
+
+precedence_direction PrecedenceDirections[] =
+{
+    precedence_direction_LeftToRight,
+    precedence_direction_LeftToRight,
+    precedence_direction_LeftToRight,
+    precedence_direction_LeftToRight,
+    precedence_direction_LeftToRight,
+    precedence_direction_LeftToRight,
+    precedence_direction_LeftToRight,
+    precedence_direction_LeftToRight,
+    precedence_direction_RightToLeft,
+};
+
+#define CREATE_ENUM(Prefix, Name, Precedence) Prefix##_##Name,
+#define CREATE_STRING(Prefix, Name, Precedence) #Name,
+#define CREATE_PRECEDENCE(Prefix, Name, Precedence) operator_precedence_##Precedence,
 
 #define TOKEN_TYPES(x)    \
-    x(token_type, UNKNOWN) \
-    x(token_type, EOF) \
-    x(token_type, NEWLINE) \
-    x(token_type, SEMICOLON) \
-    x(token_type, COMMA) \
-    x(token_type, MINUS) \
-    x(token_type, PLUS) \
-    x(token_type, STAR) \
-    x(token_type, SLASH) \
-    x(token_type, CARET) \
-    x(token_type, POUND) \
-    x(token_type, OPAREN) \
-    x(token_type, CPAREN) \
-    x(token_type, OBRACKET) \
-    x(token_type, CBRACKET) \
-    x(token_type, EQ) \
-    x(token_type, LT) \
-    x(token_type, LTE) \
-    x(token_type, GT) \
-    x(token_type, GTE) \
-    x(token_type, OF) \
-    x(token_type, OR) \
-    x(token_type, AND) \
-    x(token_type, INTEGER) \
-    x(token_type, REAL) \
-    x(token_type, CHAR) \
-    x(token_type, ID) \
-    x(token_type, STRING) \
-    x(token_type, NOOP) \
-    x(token_type, REM)       \
-    x(token_type, PRINT)     \
-    x(token_type, LIN)     \
-    x(token_type, TAB)     \
-    x(token_type, INT)     \
-    x(token_type, RND)     \
-    x(token_type, TIM)     \
-    x(token_type, DIM)       \
-    x(token_type, INPUT)     \
-    x(token_type, IF)        \
-    x(token_type, THEN)        \
-    x(token_type, END)       \
-    x(token_type, LET)       \
-    x(token_type, DATA)      \
-    x(token_type, ENTER)     \
-    x(token_type, GOSUB)     \
-    x(token_type, GOTO)      \
-    x(token_type, READ)      \
-    x(token_type, RESTORE)   \
-    x(token_type, RETURN)    \
-    x(token_type, CONS)    \
-    x(token_type, STOP)
+    x(token_type, UNKNOWN, None)                     \
+    x(token_type, EOF, None)                              \
+    x(token_type, NEWLINE, None)                               \
+    x(token_type, SEMICOLON, None)                                  \
+    x(token_type, COMMA, None)                                           \
+    x(token_type, NEGATE, Unary)                                               \
+    x(token_type, MINUS, AddSub)                                               \
+    x(token_type, PLUS, AddSub)                                                \
+    x(token_type, STAR, MulDiv)                                                \
+    x(token_type, SLASH, MulDiv)                                               \
+    x(token_type, CARET, Exponent)                                               \
+    x(token_type, POUND, None)                                               \
+    x(token_type, OPAREN, None)                                              \
+    x(token_type, CPAREN, None)                                              \
+    x(token_type, OBRACKET, None)                                            \
+    x(token_type, CBRACKET, None)                                            \
+    x(token_type, EQ, Comparison)                                                  \
+    x(token_type, LT, Comparison)                                                  \
+    x(token_type, LTE, Comparison)                                                 \
+    x(token_type, GT, Comparison)                                                  \
+    x(token_type, GTE, Comparison)                                                 \
+    x(token_type, OF, None)                                                  \
+    x(token_type, OR, Or)                                                  \
+    x(token_type, AND, And)                                                 \
+    x(token_type, INTEGER, None)                                             \
+    x(token_type, REAL, None)                                                \
+    x(token_type, CHAR, None)                                                \
+    x(token_type, ID, None)                                                  \
+    x(token_type, STRING, None)                                              \
+    x(token_type, NOOP, None)                                                \
+    x(token_type, REM, None)                                                 \
+    x(token_type, PRINT, None)                                               \
+    x(token_type, LIN, None)                                                 \
+    x(token_type, TAB, None)                                                 \
+    x(token_type, INT, None)                                                 \
+    x(token_type, RND, None)                                                 \
+    x(token_type, TIM, None)                                                 \
+    x(token_type, DIM, None)                                                 \
+    x(token_type, INPUT, None)                                               \
+    x(token_type, IF, None)                                                  \
+    x(token_type, THEN, None)                                                \
+    x(token_type, END, None)                                                 \
+    x(token_type, LET, None)                                                 \
+    x(token_type, DATA, None)                                                \
+    x(token_type, ENTER, None)                                               \
+    x(token_type, GOSUB, None)                                               \
+    x(token_type, GOTO, None)                                                \
+    x(token_type, READ, None)                                                \
+    x(token_type, RESTORE, None)                                             \
+    x(token_type, RETURN, None)                                              \
+    x(token_type, CONS, None)                                                \
+    x(token_type, STOP, None)
 
 enum token_type
 {
@@ -89,23 +133,28 @@ const char *TokenTypeNames[] =
     TOKEN_TYPES(CREATE_STRING)
 };
 
+const operator_precedence TokenTypePrecedences[] =
+{
+    TOKEN_TYPES(CREATE_PRECEDENCE)
+};
+
 #define BASIC_COMMANDS(x) \
-    x(basic_command, NOOP) \
-    x(basic_command, REM)       \
-    x(basic_command, PRINT)     \
-    x(basic_command, DIM)       \
-    x(basic_command, INPUT)     \
-    x(basic_command, IF)        \
-    x(basic_command, END)       \
-    x(basic_command, LET)       \
-    x(basic_command, DATA)      \
-    x(basic_command, ENTER)     \
-    x(basic_command, GOSUB)     \
-    x(basic_command, GOTO)      \
-    x(basic_command, READ)      \
-    x(basic_command, RESTORE)   \
-    x(basic_command, RETURN)    \
-    x(basic_command, STOP)
+    x(basic_command, NOOP, None)     \
+    x(basic_command, REM, None)           \
+    x(basic_command, PRINT, None)              \
+    x(basic_command, DIM, None)                     \
+    x(basic_command, INPUT, None)                        \
+    x(basic_command, IF, None)                                \
+    x(basic_command, END, None)                                    \
+    x(basic_command, LET, None)                                         \
+    x(basic_command, DATA, None)                                             \
+    x(basic_command, ENTER, None)                                            \
+    x(basic_command, GOSUB, None)                                            \
+    x(basic_command, GOTO, None)                                             \
+    x(basic_command, READ, None)                                             \
+    x(basic_command, RESTORE, None)                                          \
+    x(basic_command, RETURN, None)                                           \
+    x(basic_command, STOP, None)
 
 enum basic_command
 {
@@ -173,6 +222,69 @@ struct temporary_memory
 {
     size_t AllocatedBefore;
 };
+
+void DebugLexer(parser *Parser)
+{
+    for (s32 LexIndex = 0; LexIndex < Parser->LexemeCount; ++LexIndex)
+    {
+        lexeme *Lexeme = Parser->Lexemes + LexIndex;
+        printf("%s ", TokenTypeNames[Lexeme->Type]);
+        switch (Lexeme->Type)
+        {
+            case token_type_REM:
+            {
+                printf("%.*s", Lexeme->String.Length, Lexeme->String.Memory);
+            } break;
+            case token_type_INTEGER:
+            {
+                printf("%d", Lexeme->Integer);
+            } break;
+            case token_type_REAL:
+            {
+                printf("%f", Lexeme->Real);
+            } break;
+            case token_type_CHAR:
+            {
+                printf("%d", Lexeme->Character);
+            } break;
+            case token_type_STRING:
+            {
+                printf("%.*s", Lexeme->String.Length, Lexeme->String.Memory);
+            } break;
+            case token_type_ID:
+            {
+                if (Lexeme->IsString)
+                {
+                    printf("%.*s$", Lexeme->String.Length, Lexeme->String.Memory);
+                }
+                else
+                {
+                    printf("%.*s", Lexeme->String.Length, Lexeme->String.Memory);
+                }
+            } break;
+            case token_type_UNKNOWN:
+            {
+                if (Lexeme->String.Memory)
+                {
+                    printf("%.*s", Lexeme->String.Length, Lexeme->String.Memory);
+                }
+                else
+                {
+                    printf("%c", Lexeme->Character);
+                }
+            } break;
+            default:
+            {
+            } break;
+        }
+        printf("\n");
+    }
+}
+
+u8 IsNumber(token_type Type)
+{
+    return Type == token_type_INTEGER || Type == token_type_REAL;
+}
 
 temporary_memory BeginTemporaryMemory(memory_arena *Arena)
 {
@@ -541,6 +653,39 @@ s32 StringAppend(parser *Parser, char Char)
     return StringAppend(&Parser->StringArena, Char);
 }
 
+size_t IntegerAppend(memory_arena *Arena, s32 Integer)
+{
+    size_t Result = 0;
+    if (Integer == 0)
+    {
+        Result += StringAppend(Arena, '0');
+    }
+    else
+    {
+        if (Integer < 0)
+        {
+            Result += StringAppend(Arena, '-');
+            Integer *= -1;
+        }
+        string_reference Digits = BeginString(Arena);
+        while (Integer)
+        {
+            Digits.Length += StringAppend(Arena, '0' + (Integer % 10));
+            Integer /= 10;
+        }
+        Result += Digits.Length;
+        char *Head = Digits.Memory;
+        char *Tail = Head + Digits.Length - 1;
+        while (Head < Tail)
+        {
+            char Temp = *Tail;
+            *Tail-- = *Head;
+            *Head++ = Temp;
+        }
+    }
+    return Result;
+}
+
 lexeme *LexCharacter(parser *Parser)
 {
     lexeme *Lexeme = PreviousLexeme(Parser);
@@ -901,73 +1046,145 @@ lexeme *SimpleExpression(parser *Parser)
 {
     lexeme *Result = 0;
     lexeme *Peek = PeekLex(Parser);
-    if (IsUnaryOperator(Peek))
+    switch (Peek->Type)
     {
-        Result = GetLex(Parser);
-        Result->Right = Expression(Parser);
-    }
-    else
-    {
-        switch (Peek->Type)
+        case token_type_STRING:
+        case token_type_INTEGER:
+        case token_type_REAL:
+        case token_type_ID:
         {
-            case token_type_STRING:
-            case token_type_INTEGER:
-            case token_type_REAL:
-            case token_type_ID:
-            {
-                Result = GetLex(Parser);
-            } break;
-            case token_type_OPAREN:
-            {
-                Match(Parser, token_type_OPAREN);
-                Result = Expression(Parser);
-                Match(Parser, token_type_CPAREN);
-            } break;
-            case token_type_LIN:
-            {
-                Result = Lin(Parser);
-            } break;
-            case token_type_TAB:
-            {
-                Result = Tab(Parser);
-            } break;
-            case token_type_INT:
-            {
-                Result = Int(Parser);
-            } break;
-            case token_type_RND:
-            {
-                Result = Rnd(Parser);
-            } break;
-            case token_type_TIM:
-            {
-                Result = Tim(Parser);
-            } break;
-            default:
-            {
-                Panic(Peek, "Invalid expression LHS %s\n", TokenTypeNames[Peek->Type]);
-            }
+            Result = GetLex(Parser);
+        } break;
+        case token_type_OPAREN:
+        {
+            Match(Parser, token_type_OPAREN);
+            Result = Expression(Parser);
+            Match(Parser, token_type_CPAREN);
+        } break;
+        case token_type_LIN:
+        {
+            Result = Lin(Parser);
+        } break;
+        case token_type_TAB:
+        {
+            Result = Tab(Parser);
+        } break;
+        case token_type_INT:
+        {
+            Result = Int(Parser);
+        } break;
+        case token_type_RND:
+        {
+            Result = Rnd(Parser);
+        } break;
+        case token_type_TIM:
+        {
+            Result = Tim(Parser);
+        } break;
+        default:
+        {
+            Panic(Peek, "Invalid expression LHS %s\n", TokenTypeNames[Peek->Type]);
         }
     }
     return Result;
 }
 
+u8 IsLeftToRight(lexeme *A, lexeme *B)
+{
+    operator_precedence Precedence = TokenTypePrecedences[B->Type];
+    s32 Direction = TokenTypePrecedences[A->Type] - Precedence;
+    if (!Direction)
+    {
+        Direction = PrecedenceDirections[Precedence];
+    }
+    return Direction > 0;
+}
+
 lexeme *Expression(parser *Parser)
 {
-    lexeme *Result = SimpleExpression(Parser);
+    // TODO: Unary operators.
+    lexeme Sentinel = {};
+    lexeme *OperatorStack[64];
+    lexeme *Operator;
+    size_t StackCount = 0;
+    Sentinel.Right = SimpleExpression(Parser);
+    OperatorStack[StackCount++] = &Sentinel;
     while (IsBinaryOperator(PeekLex(Parser)))
     {
-        lexeme *LHS = Result;
-        Result = GetLex(Parser);
-        Result->Left = LHS;
-        Result->Right = SimpleExpression(Parser);
+        Operator = GetLex(Parser);
+        while (IsLeftToRight(OperatorStack[StackCount-1], Operator))
+        {
+            --StackCount;
+        }
+        Operator->Left = OperatorStack[StackCount-1]->Right;
+        Operator->Right = SimpleExpression(Parser);
+        OperatorStack[StackCount-1]->Right = Operator;
+        if (ArrayCount(OperatorStack) <= StackCount)
+        {
+            Panic(Operator, "Stack overflow");
+        }
+        OperatorStack[StackCount++] = Operator;
     }
-    if (!Result)
+#if 0
+    lexeme Sentinel = {};
+    lexeme *Operator;
+    s32 Direction;
+    operator_precedence Precedence;
+    lexeme *PreviousOperator = &Sentinel;
+    PreviousOperator->Right = SimpleExpression(Parser);
+    while (IsBinaryOperator(PeekLex(Parser)))
+    {
+        Operator = GetLex(Parser);
+        printf("%s\n", TokenTypeNames[Operator->Type]);
+        Precedence = TokenTypePrecedences[Operator->Type];
+        Direction = TokenTypePrecedences[PreviousOperator->Type] - Precedence;
+        if (!Direction)
+        {
+            Direction = PrecedenceDirections[Precedence];
+        }
+        printf("%d\n", Direction);
+        Assert(Direction);
+        if (Direction < 0)
+        {
+            Operator->Left = PreviousOperator->Right;
+            PreviousOperator->Right = Operator;
+        }
+        else
+        {
+            Operator->Left = PreviousOperator;
+        }
+        Operator->Right = SimpleExpression(Parser);
+        PreviousOperator = Operator;
+    }
+#endif
+#if 0
+    lexeme **Ptr = &Sentinel.Right;
+    lexeme *PreviousOperator = &Sentinel;
+    u8 PendingBinaryOperator;
+    do
+    {
+        while (IsUnaryOperator(PeekLex(Parser)))
+        {
+            lexeme *Unary = PreviousOperator = GetLex(Parser);
+            *Ptr = Unary;
+            Ptr = &Unary->Right;
+        }
+        lexeme *LHS = SimpleExpression(Parser);
+        PendingBinaryOperator = IsBinaryOperator(PeekLex(Parser));
+        if (PendingBinaryOperator)
+        {
+            lexeme *LHS = Result;
+            Result = GetLex(Parser);
+            Result->Left = LHS;
+            Ptr = &Result->Right;
+        }
+    } while (PendingBinaryOperator);
+    if (!Sentinel.Right)
     {
         Panic(Parser, "Expected expression");
     }
-
-    return Result;
+#endif
+    return Sentinel.Right;
 }
 
 lexeme *PrintArgs(parser *Parser)
@@ -1233,32 +1450,155 @@ lexeme *EvaluateEquality(environment *Environment, lexeme *LHS, lexeme *RHS, lex
     return Output;
 }
 
-lexeme *BeginIntegerOperation(environment *Environment, lexeme *Operator, lexeme *Output, lexeme *LHS, lexeme *RHS)
+lexeme *NumberOperation(environment *Environment, lexeme *Operator, lexeme *Output)
 {
-    LHS->Type = token_type_INTEGER;
-    LHS->Integer = 0;
+    lexeme LHS, RHS;
+    LHS.Type = token_type_INTEGER;
+    LHS.Integer = 0;
     if (Operator->Left)
     {
-        EvaluateExpression(Environment, Operator->Left, LHS);
+        EvaluateExpression(Environment, Operator->Left, &LHS);
     }
-    EvaluateExpression(Environment, Operator->Right, RHS);
-    if (LHS->Type != token_type_INTEGER || RHS->Type != token_type_INTEGER)
+    EvaluateExpression(Environment, Operator->Right, &RHS);
+    if (!IsNumber(LHS.Type) || !IsNumber(RHS.Type))
     {
-        Panic(Operator, "Can't combine non-integer values %s and %s", TokenTypeNames[LHS->Type], TokenTypeNames[RHS->Type]);
+        Panic(Operator, "Cannot numerically operate on types %s and %s", TokenTypeNames[LHS.Type], TokenTypeNames[RHS.Type]);
     }
-    Output->Type = token_type_INTEGER;
+    else if (LHS.Type == token_type_INTEGER && RHS.Type == token_type_INTEGER)
+    {
+        Output->Type = token_type_INTEGER;
+        switch (Operator->Type)
+        {
+            case token_type_PLUS:
+            {
+                Output->Integer = LHS.Integer + RHS.Integer;
+            } break;
+            case token_type_MINUS:
+            {
+                Output->Integer = LHS.Integer - RHS.Integer;
+            } break;
+            case token_type_STAR:
+            {
+                Output->Integer = LHS.Integer * RHS.Integer;
+            } break;
+            case token_type_SLASH:
+            {
+                Output->Integer = LHS.Integer / RHS.Integer;
+            } break;
+            case token_type_CARET:
+            {
+                Output->Type = token_type_REAL;
+                Output->Real = pow((r32)LHS.Integer, (r32)RHS.Integer);
+            } break;
+            default:
+            {
+                Panic(Operator, "No number operation defined for type %s", TokenTypeNames[Operator->Type]);
+            } break;
+        }
+    }
+    else
+    {
+        r32 LHSReal = (LHS.Type == token_type_REAL) ? LHS.Real : (r32)LHS.Integer;
+        r32 RHSReal = (RHS.Type == token_type_REAL) ? RHS.Real : (r32)RHS.Integer;
+        Output->Type = token_type_REAL;
+        switch (Operator->Type)
+        {
+            case token_type_PLUS:
+            {
+                Output->Real = LHSReal + RHSReal;
+            } break;
+            case token_type_MINUS:
+            {
+                Output->Real = LHSReal - RHSReal;
+            } break;
+            case token_type_STAR:
+            {
+                Output->Real = LHSReal * RHSReal;
+            } break;
+            case token_type_SLASH:
+            {
+                Output->Real = LHSReal / RHSReal;
+            } break;
+            case token_type_CARET:
+            {
+                Output->Real = pow(LHSReal, RHSReal);
+            } break;
+            default:
+            {
+                Panic(Operator, "No number operation defined for type %s", TokenTypeNames[Operator->Type]);
+            } break;
+        }
+    }
+
     return Output;
 }
 
-lexeme *BeginIntegerComparison(environment *Environment, lexeme *Operator, lexeme *Output, lexeme *LHS, lexeme *RHS)
+lexeme *NumberComparison(environment *Environment, lexeme *Operator, lexeme *Output)
 {
-    EvaluateExpression(Environment, Operator->Left, LHS);
-    EvaluateExpression(Environment, Operator->Right, RHS);
-    if (LHS->Type != token_type_INTEGER || RHS->Type != token_type_INTEGER)
-    {
-        Panic(Operator, "Can't compare non-integer values %s and %s", TokenTypeNames[LHS->Type], TokenTypeNames[LHS->Type]);
-    }
+    lexeme LHS, RHS;
+    EvaluateExpression(Environment, Operator->Left, &LHS);
+    EvaluateExpression(Environment, Operator->Right, &RHS);
     Output->Type = token_type_INTEGER;
+
+    if (!IsNumber(LHS.Type) || !IsNumber(RHS.Type))
+    {
+        Panic(Operator, "Cannot compare types %s and %s", TokenTypeNames[LHS.Type], TokenTypeNames[RHS.Type]);
+    }
+    else if (LHS.Type == token_type_INTEGER && RHS.Type == token_type_INTEGER)
+    {
+        switch (Operator->Type)
+        {
+            case token_type_GT:
+            {
+                Output->Integer = LHS.Integer > RHS.Integer;
+            } break;
+            case token_type_LT:
+            {
+                Output->Integer = LHS.Integer < RHS.Integer;
+            } break;
+            case token_type_GTE:
+            {
+                Output->Integer = LHS.Integer >= RHS.Integer;
+            } break;
+            case token_type_LTE:
+            {
+                Output->Integer = LHS.Integer >= RHS.Integer;
+            } break;
+            default:
+            {
+                Panic(Operator, "No comparison defined for type %s", TokenTypeNames[Operator->Type]);
+            } break;
+        }
+    }
+    else
+    {
+        r32 LHSReal = (LHS.Type == token_type_REAL) ? LHS.Real : (r32)LHS.Integer;
+        r32 RHSReal = (RHS.Type == token_type_REAL) ? RHS.Real : (r32)RHS.Integer;
+        switch (Operator->Type)
+        {
+            case token_type_GT:
+            {
+                Output->Integer = LHSReal > RHSReal;
+            } break;
+            case token_type_LT:
+            {
+                Output->Integer = LHSReal < RHSReal;
+            } break;
+            case token_type_GTE:
+            {
+                Output->Integer = LHSReal >= RHSReal;
+            } break;
+            case token_type_LTE:
+            {
+                Output->Integer = LHSReal <= RHSReal;
+            } break;
+            default:
+            {
+                Panic(Operator, "No comparison defined for type %s", TokenTypeNames[Operator->Type]);
+            } break;
+        }
+    }
+
     return Output;
 }
 
@@ -1275,6 +1615,10 @@ lexeme *ToInteger(environment *Environment, lexeme *Value, lexeme *Output)
         case token_type_INTEGER:
         {
             Integer.Integer = Value->Integer;
+        } break;
+        case token_type_REAL:
+        {
+            Integer.Integer = Value->Real != 0.0f;
         } break;
         default:
         {
@@ -1340,44 +1684,19 @@ lexeme *EvaluateExpression(environment *Environment, lexeme *Expr, lexeme *Value
             EvaluateEquality(Environment, &LHS, &RHS, Value);
         } break;
         case token_type_GTE:
-        {
-            BeginIntegerComparison(Environment, Expr, Value, &LHS, &RHS);
-            Value->Integer = LHS.Integer >= RHS.Integer;
-        } break;
         case token_type_GT:
-        {
-            BeginIntegerComparison(Environment, Expr, Value, &LHS, &RHS);
-            Value->Integer = LHS.Integer > RHS.Integer;
-        } break;
         case token_type_LTE:
-        {
-            BeginIntegerComparison(Environment, Expr, Value, &LHS, &RHS);
-            Value->Integer = LHS.Integer <= RHS.Integer;
-        } break;
         case token_type_LT:
         {
-            BeginIntegerComparison(Environment, Expr, Value, &LHS, &RHS);
-            Value->Integer = LHS.Integer < RHS.Integer;
+            NumberComparison(Environment, Expr, Value);
         } break;
         case token_type_PLUS:
-        {
-            BeginIntegerOperation(Environment, Expr, Value, &LHS, &RHS);
-            Value->Integer = LHS.Integer + RHS.Integer;
-        } break;
         case token_type_MINUS:
-        {
-            BeginIntegerOperation(Environment, Expr, Value, &LHS, &RHS);
-            Value->Integer = LHS.Integer - RHS.Integer;
-        } break;
         case token_type_STAR:
-        {
-            BeginIntegerOperation(Environment, Expr, Value, &LHS, &RHS);
-            Value->Integer = LHS.Integer * RHS.Integer;
-        } break;
         case token_type_SLASH:
+        case token_type_CARET:
         {
-            BeginIntegerOperation(Environment, Expr, Value, &LHS, &RHS);
-            Value->Integer = LHS.Integer / RHS.Integer;
+            NumberOperation(Environment, Expr, Value);
         } break;
         default:
         {
@@ -1401,34 +1720,7 @@ lexeme *ToString(environment *Environment, lexeme *Value, lexeme *String)
             lexeme Temp;
             Temp.Type = token_type_STRING;
             Temp.String = BeginString(Arena);
-            Temp.Integer = Value->Integer;
-            if (Temp.Integer == 0)
-            {
-                Temp.String.Length += StringAppend(Arena, '0');
-            }
-            else
-            {
-                if (Temp.Integer < 0)
-                {
-                    Temp.String.Length += StringAppend(Arena, '-');
-                    Temp.Integer *= -1;
-                }
-                string_reference Digits = BeginString(Arena);
-                while (Temp.Integer)
-                {
-                    Digits.Length += StringAppend(Arena, '0' + (Temp.Integer % 10));
-                    Temp.Integer /= 10;
-                }
-                Temp.String.Length += Digits.Length;
-                char *Head = Digits.Memory;
-                char *Tail = Head + Digits.Length - 1;
-                while (Head < Tail)
-                {
-                    char Temp = *Tail;
-                    *Tail-- = *Head;
-                    *Head++ = Temp;
-                }
-            }
+            Temp.String.Length = IntegerAppend(Arena, Value->Integer);
             *String = Temp;
         } break;
         default:
@@ -1562,6 +1854,7 @@ void EvaluateIf(environment *Environment, lexeme *Lexeme)
 {
     lexeme Value;
     EvaluateExpression(Environment, Lexeme->Left, &Value);
+    printf("====%s====", __func__);
     ToInteger(Environment, &Value, &Value);
     if (Value.Integer)
     {
@@ -1710,14 +2003,200 @@ void Evaluate(environment *Environment, lexeme *Lexeme)
     }
 }
 
+size_t RenderExpression(lexeme *Expr, memory_arena *Arena)
+{
+    size_t Result = 0;
+    size_t StackCount = 0;
+    lexeme *Stack[64];
+    s32 RightBalanceStack[64];
+    s32 Parens;
+    s32 LeftBalance;
+    s32 RightBalance = -1;
+    lexeme *NextExpr = Expr;
+    while (NextExpr || StackCount)
+    {
+        LeftBalance = 0;
+        if (NextExpr)
+        {
+            RightBalance += 1;
+            Expr = NextExpr;
+            while (Expr->Left)
+            {
+                if (sizeof Stack <= StackCount)
+                {
+                    Panic(Expr, "stack overflow");
+                }
+                RightBalanceStack[StackCount] = RightBalance;
+                Stack[StackCount++] = Expr;
+                LeftBalance--;
+                Expr = Expr->Left;
+            }
+        }
+        else
+        {
+            Expr = Stack[--StackCount];
+            RightBalance = RightBalanceStack[StackCount];
+        }
+        NextExpr = Expr->Right;
+
+        Parens = LeftBalance;
+        while (Parens++)
+        {
+            Result += StringAppend(Arena, '(');
+        }
+        switch (Expr->Type)
+        {
+            case token_type_PLUS:
+            {
+                Result += StringAppend(Arena, '+');
+            } break;
+            case token_type_MINUS:
+            {
+                Result += StringAppend(Arena, '-');
+            } break;
+            case token_type_STAR:
+            {
+                Result += StringAppend(Arena, '*');
+            } break;
+            case token_type_SLASH:
+            {
+                Result += StringAppend(Arena, '/');
+            } break;
+            case token_type_INTEGER:
+            {
+                Result += IntegerAppend(Arena, Expr->Integer);
+            } break;
+            case token_type_EQ:
+            {
+                Result += StringAppend(Arena, '=');
+            } break;
+            case token_type_LT:
+            {
+                Result += StringAppend(Arena, '<');
+            } break;
+            case token_type_LTE:
+            {
+                Result += StringAppend(Arena, '<');
+                Result += StringAppend(Arena, '=');
+            } break;
+            case token_type_GTE:
+            {
+                Result += StringAppend(Arena, '>');
+                Result += StringAppend(Arena, '=');
+            } break;
+            case token_type_GT:
+            {
+                Result += StringAppend(Arena, '>');
+            } break;
+            case token_type_CARET:
+            {
+                Result += StringAppend(Arena, '^');
+            } break;
+            default:
+            {
+                Panic(Expr, "Unhandled token type %s", TokenTypeNames[Expr->Type]);
+            } break;
+        }
+        Parens = RightBalance;
+        if (!NextExpr && !LeftBalance)
+        {
+            while (Parens--)
+            {
+                Result += StringAppend(Arena, ')');
+            }
+        }
+    }
+    return Result;
+}
+
+string_reference ParseTest(environment *Environment, string_reference ExpressionString, lexeme *Value)
+{
+    parser *Parser = &Environment->Parser;
+    memory_arena *Arena = &Parser->StringArena;
+    {
+        Arena->Allocated = 0;
+        Parser->Position = 0;
+        Parser->NaturalLexemeCount = Parser->LexemeCount = Parser->LexemePosition = 0;
+        Parser->SourceLineNumber = 1;
+        Environment->Goto = 0;
+        Environment->VariableCount = 0;
+        Environment->StackLength = 0;
+    }
+    Parser->Size = ExpressionString.Length;
+    Parser->Contents = (u8*)ExpressionString.Memory;
+    Lex(Parser);
+    lexeme *Expr = Expression(Parser);
+    EvaluateExpression(Environment, Expr, Value);
+    string_reference Actual = BeginString(Arena);
+    Actual.Length = RenderExpression(Expr, Arena);
+    return Actual;
+}
+
+int ExpressionTest(environment *Environment, string_reference ExpressionString, string_reference Expected, s32 ExpectedValue)
+{
+    int Result = 0;
+    printf("Expecting: %.*s=%d . . . ", Expected.Length, Expected.Memory, ExpectedValue);
+    lexeme Value;
+    string_reference Actual = ParseTest(Environment, ExpressionString, &Value);
+    if (Equals(Expected, Actual) && Value.Type == token_type_INTEGER && Value.Integer == ExpectedValue)
+    {
+        printf("\033[32mPASS\033[0m\n");
+    }
+    else
+    {
+        printf("\033[31mFAIL\nActual:    %.*s=%d\033[0m\n", Actual.Length, Actual.Memory, Value.Integer);
+        Result = 1;
+    }
+    return Result;
+}
+
+int ExpressionTest(environment *Environment, string_reference ExpressionString, string_reference Expected, double ExpectedValue)
+{
+    int Result = 0;
+    printf("Expecting: %.*s=%f . . . ", Expected.Length, Expected.Memory, ExpectedValue);
+    lexeme Value;
+    string_reference Actual = ParseTest(Environment, ExpressionString, &Value);
+    if (Equals(Expected, Actual) && Value.Type == token_type_REAL && Value.Real == ExpectedValue)
+    {
+        printf("\033[32mPASS\033[0m\n");
+    }
+    else
+    {
+        printf("\033[31mFAIL\nActual:    %.*s=%f\033[0m\n", Actual.Length, Actual.Memory, Value.Real);
+        Result = 1;
+    }
+    return Result;
+}
+
+#define EXPRESSION_TEST(Environment, ExpressionString, ExpectedString, ExpectedValue) ExpressionTest(Environment, STRING_REFERENCE(ExpressionString), STRING_REFERENCE(ExpectedString), ExpectedValue)
+
+int Test(environment *Environment)
+{
+    int Result = 0;
+    Result += EXPRESSION_TEST(Environment, "0", "0", 0);
+    Result += EXPRESSION_TEST(Environment, "1", "1", 1);
+    Result += EXPRESSION_TEST(Environment, "1+2*3+4", "((1+(2*3))+4)", 1+2*3+4);
+    Result += EXPRESSION_TEST(Environment, "1*2+3*4", "((1*2)+(3*4))", 1*2+3*4);
+    Result += EXPRESSION_TEST(Environment, "1*2=3*4", "((1*2)=(3*4))", 1*2==3*4);
+    Result += EXPRESSION_TEST(Environment, "4^3^2", "(4^(3^2))", pow(4, pow(3, 2)));
+    Result += EXPRESSION_TEST(Environment, "2-1", "(2-1)", 2-1);
+    Result += EXPRESSION_TEST(Environment, "1-2", "(1-2)", 1-2);
+    Result += EXPRESSION_TEST(Environment, "-1", "(-1)", -1);
+    return Result;
+}
+
 int main(int ArgCount, char *Args[])
 {
     setvbuf(stdout, NULL, _IONBF, 0);
     char StringMemory[65536];
     environment Environment = {};
-    Environment.Parser.StringArena.Memory = StringMemory;
-    Environment.Parser.StringArena.Size = sizeof StringMemory;
     parser *Parser = &Environment.Parser;
+    Parser->StringArena.Memory = StringMemory;
+    Parser->StringArena.Size = sizeof StringMemory;
+#if RUN_TESTS
+    return Test(&Environment);
+#endif
+    Parser->SourceLineNumber = 1;
     {
         FILE *Executable = fopen(Args[0], "rb");
         u64 DataFileStart;
@@ -1731,63 +2210,9 @@ int main(int ArgCount, char *Args[])
         fread(Parser->Contents, Parser->Size, 1, Executable);
         fclose(Executable);
     }
-    Parser->SourceLineNumber = 1;
     Lex(Parser);
 #if DEBUG_LEXER
-    for (s32 LexIndex = 0; LexIndex < Parser->LexemeCount; ++LexIndex)
-    {
-        lexeme *Lexeme = Parser->Lexemes + LexIndex;
-        printf("%s ", TokenTypeNames[Lexeme->Type]);
-        switch (Lexeme->Type)
-        {
-            case token_type_REM:
-            {
-                printf("%.*s", Lexeme->String.Length, Lexeme->String.Memory);
-            } break;
-            case token_type_INTEGER:
-            {
-                printf("%d", Lexeme->Integer);
-            } break;
-            case token_type_REAL:
-            {
-                printf("%f", Lexeme->Real);
-            } break;
-            case token_type_CHAR:
-            {
-                printf("%d", Lexeme->Character);
-            } break;
-            case token_type_STRING:
-            {
-                printf("%.*s", Lexeme->String.Length, Lexeme->String.Memory);
-            } break;
-            case token_type_ID:
-            {
-                if (Lexeme->IsString)
-                {
-                    printf("%.*s$", Lexeme->String.Length, Lexeme->String.Memory);
-                }
-                else
-                {
-                    printf("%.*s", Lexeme->String.Length, Lexeme->String.Memory);
-                }
-            } break;
-            case token_type_UNKNOWN:
-            {
-                if (Lexeme->String.Memory)
-                {
-                    printf("%.*s", Lexeme->String.Length, Lexeme->String.Memory);
-                }
-                else
-                {
-                    printf("%c", Lexeme->Character);
-                }
-            } break;
-            default:
-            {
-            } break;
-        }
-        printf("\n");
-    }
+    DebugLexer(Parser);
 #endif
     lexeme EntryPoint = StatementList(Parser);
     Evaluate(&Environment, EntryPoint.Right);
