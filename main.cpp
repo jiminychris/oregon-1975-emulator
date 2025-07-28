@@ -17,6 +17,7 @@
 #define DEBUG_STATEMENT 0
 #define DEBUG_EVALUATE_STATEMENT 0
 #define DEBUG_EVAL_IF 0
+#define DEBUG_STRING_INPUT 0
 
 #define ArrayCount(Array) (sizeof(Array) / sizeof(Array[0]))
 #define Assert(Expr) {if(!(Expr)) int __AssertInt = *((volatile int *)0);}
@@ -2118,19 +2119,21 @@ void StringInput(environment *Environment, lexeme *Id, r32 TimeAllowed = -1, lex
     EndTime = StartTime;
     if (TimeAllowed < 0)
     {
-        while ((Char = getchar()) != '\n')
+        s32 BytesRead = 0;
+        do
         {
-            if (!Full(&Buffer))
+            if (BytesRead > 0 && !Full(&Buffer))
             {
                 *Buffer.At++ = Char;
             }
-        }
+            usleep(50);
+            BytesRead = read(STDIN_FILENO, &Char, 1);
+        } while (Char != '\n');
         time(&EndTime);
         Elapsed = difftime(EndTime, StartTime);
     }
     else
     {
-        Char = 0;
         s32 BytesRead = 0;
         do
         {
@@ -2152,6 +2155,9 @@ void StringInput(environment *Environment, lexeme *Id, r32 TimeAllowed = -1, lex
     
     Variable->Type = token_type_STRING;
     Variable->String.Length = Buffer.At - Buffer.Contents;
+#if DEBUG_STRING_INPUT
+    printf("(%d)%.*s\n", Variable->String.Length, Variable->String.Length, Variable->String.Memory);
+#endif
 }
 
 void EvaluateInput(environment *Environment, lexeme *Lexeme)
