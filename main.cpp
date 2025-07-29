@@ -2129,7 +2129,7 @@ u64 GetTimeMilliseconds()
     return Result;
 }
 
-void StringInput(environment *Environment, lexeme *Id, r32 SecondsAllowed = -1, lexeme *SecondsElapsed = 0)
+s32 StringInput(environment *Environment, lexeme *Id, r32 SecondsAllowed = -1, lexeme *SecondsElapsed = 0)
 {
     lexeme *Variable = FindVariable(Environment, Id);
     if (!Variable)
@@ -2239,49 +2239,65 @@ pollfd FileDescriptor;
     }
     
     Variable->Type = token_type_STRING;
-    Variable->String.Length = Buffer.At - Buffer.Contents;
+    s32 Length = Buffer.At - Buffer.Contents;
+    Variable->String.Length = Length;
 #if DEBUG_STRING_INPUT
     printf("(%d)%.*s\n", Variable->String.Length, Variable->String.Length, Variable->String.Memory);
 #endif
+    return Length;
 }
 
 void EvaluateInput(environment *Environment, lexeme *Lexeme)
 {
-    printf("?");
     char Char;
-    if (Lexeme->IsString)
+    s32 Again = 0;
+    do
     {
-        StringInput(Environment, Lexeme);
-    }
-    else
-    {
-        lexeme *Variable = LookupOrDeclareVariable(Environment, Lexeme);
-        s32 Integer = 0;
-        s32 Multiplier = 1;
-        Char = getchar();
-        while (IsIntralineWhitespace(Char))
+        printf("?%s", Again ? "?" : "");
+        if (Lexeme->IsString)
         {
-            Char = getchar();
+            Again = !StringInput(Environment, Lexeme);
         }
-        if (Char == '-')
+        else
         {
-            Multiplier = -1;
+            Again = 1;
+            lexeme *Variable = LookupOrDeclareVariable(Environment, Lexeme);
+            s32 Integer = 0;
+            s32 Multiplier = 1;
             Char = getchar();
-        }
-        while (Char != '\n')
-        {
-#if DEBUG_TIMED_INPUT
-            printf("Char: %c(%d)\n", Char, Char);
-#endif
-            if (isdigit(Char))
+            while (!(Char == '-' || Char == '\n' || isdigit(Char)))
             {
-                Integer = 10 * Integer + Char - '0';
+                Char = getchar();
             }
-            Char = getchar();
+            if (Char == '-')
+            {
+                Multiplier = -1;
+                Char = getchar();
+            }
+            while (isdigit(Char))
+            {
+                Again = 0;
+#if DEBUG_TIMED_INPUT
+                printf("Char: %c(%d)\n", Char, Char);
+#endif
+                Integer = 10 * Integer + Char - '0';
+                Char = getchar();
+            }
+            if (Char != '\n')
+            {
+                printf("EXTRA INPUT - WARNING ONLY\n");
+                do
+                {
+#if DEBUG_TIMED_INPUT
+                    printf("Char: %c(%d)\n", Char, Char);
+#endif
+                    Char = getchar();
+                } while (Char != '\n');
+            }
+            Variable->Type = token_type_INTEGER;
+            Variable->Integer = Multiplier * Integer;
         }
-        Variable->Type = token_type_INTEGER;
-        Variable->Integer = Multiplier * Integer;
-    }
+    } while (Again);
 }
 
 void EvaluateIf(environment *Environment, lexeme *Lexeme)
