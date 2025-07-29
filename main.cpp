@@ -7,6 +7,7 @@
 #include <math.h>
 #include <time.h>
 #include <unistd.h>
+#include <poll.h>
 
 #include "primitives.h"
 
@@ -18,9 +19,20 @@
 #define DEBUG_EVALUATE_STATEMENT 0
 #define DEBUG_EVAL_IF 0
 #define DEBUG_STRING_INPUT 0
+#define DEBUG_TIMED_INPUT 0
 
 #define ArrayCount(Array) (sizeof(Array) / sizeof(Array[0]))
 #define Assert(Expr) {if(!(Expr)) int __AssertInt = *((volatile int *)0);}
+
+size_t Min(size_t A, size_t B)
+{
+    return A < B ? A : B;
+}
+
+size_t Max(size_t A, size_t B)
+{
+    return A > B ? A : B;
+}
 
 s32 Min(s32 A, s32 B)
 {
@@ -28,6 +40,26 @@ s32 Min(s32 A, s32 B)
 }
 
 s32 Max(s32 A, s32 B)
+{
+    return A > B ? A : B;
+}
+
+r32 Min(r32 A, r32 B)
+{
+    return A < B ? A : B;
+}
+
+r32 Max(r32 A, r32 B)
+{
+    return A > B ? A : B;
+}
+
+r64 Min(r64 A, r64 B)
+{
+    return A < B ? A : B;
+}
+
+r64 Max(r64 A, r64 B)
 {
     return A > B ? A : B;
 }
@@ -567,43 +599,6 @@ lexeme *LookupOrDeclareVariable(environment *Environment, lexeme *Lexeme)
     }
     return Variable;
 }
-
-#if 0
-void ParseVariableName(parser *Parser, basic_line *Line)
-{
-    Line->Name = Parser->Strings[Parser->StringCount++];
-    buffer _StringBuffer = NewBuffer(Line->Name, sizeof Parser->Strings[0]);
-    buffer *StringBuffer = &_StringBuffer;
-    while (!Full(StringBuffer) && IsUpperOrDigit(PeekChar(Parser)))
-    {
-        *StringBuffer->At++ = GetChar(Parser);
-    }
-    if (!Full(StringBuffer) && PeekChar(Parser) == '$')
-    {
-        Line->IsString = 1;
-        *StringBuffer->At++ = GetChar(Parser);
-    }
-    Line->NameLength = StringBuffer->At - StringBuffer->Contents;
-}
-void ParseString(parser *Parser, basic_line *Line)
-{
-    // TODO: Escaped quotes and separators.
-    char Char;
-    if ((Char = GetChar(Parser)) != '"')
-    {
-        Panic(Parser, "Expected '\"' when parsing string instead of '%c'.", Char);
-    }
-    Line->String = Parser->Strings[Parser->StringCount++];
-    buffer _StringBuffer = NewBuffer(Line->String, sizeof Parser->Strings[0]);
-    buffer *StringBuffer = &_StringBuffer;
-    while (!Full(StringBuffer) && !IsEOF(Parser) && PeekChar(Parser) != '"')
-    {
-        *StringBuffer->At++ = GetChar(Parser);
-    }
-    Line->Length = StringBuffer->At - StringBuffer->Contents;
-    GetChar(Parser);
-}
-#endif
 
 lexeme *PushLexeme(parser *Parser, token_type Type)
 {
@@ -2100,7 +2095,15 @@ void EvaluateDim(environment *Environment, lexeme *Lexeme)
     }
 }
 
-void StringInput(environment *Environment, lexeme *Id, r32 TimeAllowed = -1, lexeme *SecondsElapsed = 0)
+u64 GetTimeMilliseconds()
+{
+    timespec Now;
+    clock_gettime(CLOCK_REALTIME, &Now);
+    u64 Result = (u64)Now.tv_sec * 1000.0 + (u64)Now.tv_nsec * 0.000001;
+    return Result;
+}
+
+void StringInput(environment *Environment, lexeme *Id, r32 SecondsAllowed = -1, lexeme *SecondsElapsed = 0)
 {
     lexeme *Variable = FindVariable(Environment, Id);
     if (!Variable)
@@ -2111,46 +2114,102 @@ void StringInput(environment *Environment, lexeme *Id, r32 TimeAllowed = -1, lex
     {
         Panic(Id, "Cannot store string in non-string variable %.*s", Id->String.Length, Id->String.Memory);
     }
-    char Char;
+    s32 Char = 0;
     buffer Buffer = NewBuffer(Variable->String.Memory, Variable->Integer);
-    r32 Elapsed = 0;
-    time_t StartTime, EndTime;
-    time(&StartTime);
-    EndTime = StartTime;
-    if (TimeAllowed < 0)
+    u64 ElapsedMilliseconds = 0;
+    u64 StartTimeMilliseconds, EndTimeMilliseconds;
+    s32 TimedOut = 0;
+    StartTimeMilliseconds = GetTimeMilliseconds();
+    EndTimeMilliseconds = StartTimeMilliseconds;
+    if (SecondsAllowed < 0)
     {
-        s32 BytesRead = 0;
-        do
+        while ((Char = getchar()) != '\n')
         {
-            if (BytesRead > 0 && !Full(&Buffer))
+#if DEBUG_TIMED_INPUT
+            printf("Char: %c(%d)\n", Char, Char);
+#endif
+            if (!Full(&Buffer))
             {
                 *Buffer.At++ = Char;
             }
-            usleep(50);
-            BytesRead = read(STDIN_FILENO, &Char, 1);
-        } while (Char != '\n');
-        time(&EndTime);
-        Elapsed = difftime(EndTime, StartTime);
+        };
+        EndTimeMilliseconds = GetTimeMilliseconds();
+        ElapsedMilliseconds = EndTimeMilliseconds - StartTimeMilliseconds;
     }
     else
     {
-        s32 BytesRead = 0;
+#if DEBUG_TIMED_INPUT
+    printf("poll() StartTimeMilliseconds: %llu\n", StartTimeMilliseconds);
+#endif
+        int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+        fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
+pollfd FileDescriptor;
+        FileDescriptor.fd = STDIN_FILENO;
+        FileDescriptor.events = POLLIN;
+
+        s64 MillisecondsRemaining;
+        u64 MillisecondsAllowed;
+        MillisecondsRemaining = MillisecondsAllowed = SecondsAllowed * 1000;
+
         do
         {
-            if (BytesRead > 0 && !Full(&Buffer))
+            s32 FileDescriptorsReady = poll(&FileDescriptor, 1, MillisecondsRemaining);
+#if DEBUG_TIMED_INPUT
+            printf("poll() FileDescriptorsReady: %d\n", FileDescriptorsReady);
+#endif
+            if (FileDescriptorsReady > 0)
             {
-                *Buffer.At++ = Char;
+                do
+                {
+                    Char = getchar();
+                    if (Char == '\n' || Char == EOF)
+                    {
+                        break;
+                    }
+#if DEBUG_TIMED_INPUT
+                    printf("poll() Char: %c(%d)\n", Char, Char);
+#endif
+                    if (!Full(&Buffer))
+                    {
+                        *Buffer.At++ = Char;
+                    }
+                } while (1);
+                EndTimeMilliseconds = GetTimeMilliseconds();
+#if DEBUG_TIMED_INPUT
+                printf("poll() EndTimeMilliseconds: %llu\n", EndTimeMilliseconds);
+#endif
+                ElapsedMilliseconds = EndTimeMilliseconds - StartTimeMilliseconds;
+                MillisecondsRemaining = MillisecondsAllowed - ElapsedMilliseconds;
             }
-            time(&EndTime);
-            Elapsed = difftime(EndTime, StartTime);
-            usleep(50);
-            BytesRead = read(STDIN_FILENO, &Char, 1);
-        } while (Elapsed < TimeAllowed && Char != '\n');
+            else
+            {
+                TimedOut = 1;
+                Buffer.At = Buffer.Contents;
+                ElapsedMilliseconds = MillisecondsAllowed;
+                MillisecondsRemaining = 0;
+            }
+#if DEBUG_TIMED_INPUT
+            printf("poll() MillisecondsRemaining: %llu\n", MillisecondsRemaining);
+#endif
+        } while (MillisecondsRemaining > 0 && Char != '\n');
+#if DEBUG_TIMED_INPUT
+        printf("poll() ElapsedMilliseconds: %llu\n", ElapsedMilliseconds);
+#endif
+        fcntl(STDIN_FILENO, F_SETFL, flags);
     }
+
     if (SecondsElapsed)
     {
-        SecondsElapsed->Type = token_type_REAL;
-        SecondsElapsed->Real = Elapsed;
+        if (TimedOut)
+        {
+            SecondsElapsed->Type = token_type_INTEGER;
+            SecondsElapsed->Integer = -256;
+        }
+        else
+        {
+            SecondsElapsed->Type = token_type_REAL;
+            SecondsElapsed->Real = Min(ElapsedMilliseconds * 0.001f, SecondsAllowed);
+        }
     }
     
     Variable->Type = token_type_STRING;
@@ -2185,6 +2244,9 @@ void EvaluateInput(environment *Environment, lexeme *Lexeme)
         }
         while (Char != '\n')
         {
+#if DEBUG_TIMED_INPUT
+            printf("Char: %c(%d)\n", Char, Char);
+#endif
             if (isdigit(Char))
             {
                 Integer = 10 * Integer + Char - '0';
@@ -2237,7 +2299,7 @@ void EvaluateEnter(environment *Environment, lexeme *Lexeme)
         ToInteger(Environment, EvaluateExpression(Environment, Expr, &Value), &Value, integer_cast_method_Round);
         if (255 < Value.Integer || Value.Integer < 1)
         {
-            Panic(Expr, "The alloted time must be between 1 and 255");
+            Panic(Expr, "The allotted time must be between 1 and 255");
         }
 
         Variable = LookupOrDeclareVariable(Environment, Id);
@@ -2567,8 +2629,6 @@ int Test(environment *Environment)
 
 int main(int ArgCount, char *Args[])
 {
-    int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
-    fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
     setvbuf(stdout, NULL, _IONBF, 0);
     char StringMemory[65536];
     environment Environment;
@@ -2602,389 +2662,5 @@ int main(int ArgCount, char *Args[])
 #endif
     lexeme EntryPoint = StatementList(Parser);
     Evaluate(&Environment, EntryPoint.Right);
-#if 0
-    s8 Char;
-    NEW_BUFFER(CommandBuffer, 16);
-    basic_line *Line;
-    while (!IsEOF(Parser))
-    {
-        Parser->SourceLineNumber += 1;
-        Reset(CommandBuffer);
-        SkipWhitespace(Parser);
-        if (!isdigit(Char = PeekChar(Parser)))
-        {
-            Panic(Parser, "Expected line number. Got '%c'", Char);
-        }
-        u32 LineNumber = ParseInteger(Parser);
-        Line = Parser->Lines + LineNumber;
-        if (SkipIntralineWhitespace(Parser) < 1)
-        {
-            Panic(Parser, "Expected space after line number.");
-        }
-        while (!Full(CommandBuffer) && !IsEOF(Parser) && !IsWhitespace(PeekChar(Parser)))
-        {
-            *CommandBuffer->At++ = GetChar(Parser);
-        }
-        SkipIntralineWhitespace(Parser);
-        if (CHECK_COMMAND(Line, CommandBuffer, REM))
-        {
-        }
-        else if (CHECK_COMMAND(Line, CommandBuffer, PRINT))
-        {
-            Char = PeekChar(Parser);
-            if (Char == '\n')
-            {
-                Line->Length = 1;
-            }
-            else if (Char == '"')
-            {
-                ParseString(Parser, Line);
-            }
-            else
-            {
-                Reset(CommandBuffer);
-                while (!Full(CommandBuffer) && !IsEOF(Parser) && isupper(PeekChar(Parser)))
-                {
-                    *CommandBuffer->At++ = GetChar(Parser);
-                }
-                if (Equals(CommandBuffer, "LIN"))
-                {
-                    if (GetChar(Parser) != '(')
-                    {
-                        Panic(Parser, "Expected open paren after PRINT LIN");
-                    }
-                    Line->Length = ParseInteger(Parser);
-                    if (GetChar(Parser) != ')')
-                    {
-                        Panic(Parser, "Expected close paren after PRINT LIN(%d", Line->Length);
-                    }
-                }
-            }
-        }
-        else if (CHECK_COMMAND(Line, CommandBuffer, DIM))
-        {
-            if (!isupper(Char = PeekChar(Parser)))
-            {
-                Panic(Parser, "Expected a variable name after DIM instead of '%c'", Char);
-            }
-            ParseVariableName(Parser, Line);
-            if ((Char = GetChar(Parser) != '['))
-            {
-                Panic(Parser, "Expected '[' after DIM %.*s instead of '%'", Line->NameLength, Line->Name, Char);
-            }
-            Line->Dim = ParseInteger(Parser);
-            if (Line->Dim < 1)
-            {
-                Panic(Parser, "DIM must be greater than zero (%d)", Line->Dim);
-            }
-            if ((Char = GetChar(Parser) != ']'))
-            {
-                Panic(Parser, "Expected ']' after DIM %.*s[%d instead of '%'", Line->NameLength, Line->Name, Line->Dim, Char);
-            }
-        }
-        else if (CHECK_COMMAND(Line, CommandBuffer, INPUT))
-        {
-            if (!isupper(Char = PeekChar(Parser)))
-            {
-                Panic(Parser, "Expected a variable name after INPUT instead of '%c'", Char);
-            }
-            ParseVariableName(Parser, Line);
-        }
-        else if (CHECK_COMMAND(Line, CommandBuffer, IF))
-        {
-            if (isupper(Char = PeekChar(Parser)))
-            {
-                ParseVariableName(Parser, Line);
-                SkipIntralineWhitespace(Parser);
-                switch ((Char = GetChar(Parser)))
-                {
-                    case '=':
-                    {
-                        Line->Operator = basic_operator_EQ;
-                    } break;
-                    case '>':
-                    {
-                        if (PeekChar(Parser) == '=')
-                        {
-                            GetChar(Parser);
-                            Line->Operator = basic_operator_GTE;
-                        }
-                        else
-                        {
-                            Line->Operator = basic_operator_GT;
-                        }
-                    } break;
-                    case '<':
-                    {
-                        if (PeekChar(Parser) == '=')
-                        {
-                            GetChar(Parser);
-                            Line->Operator = basic_operator_LTE;
-                        }
-                        else
-                        {
-                            Line->Operator = basic_operator_LT;
-                        }
-                    } break;
-                    default:
-                    {
-                        goto skip;
-                    } break;
-                }
-                SkipIntralineWhitespace(Parser);
-                if (Line->IsString)
-                {
-                    ParseString(Parser, Line);
-                }
-                else
-                {
-                    Line->Integer = ParseInteger(Parser);
-                }
-                SkipIntralineWhitespace(Parser);
-                Reset(CommandBuffer);
-                while (!Full(CommandBuffer) && !IsEOF(Parser) && isupper(PeekChar(Parser)))
-                {
-                    *CommandBuffer->At++ = GetChar(Parser);
-                }
-                if (Equals(CommandBuffer, "THEN"))
-                {
-                    SkipIntralineWhitespace(Parser);
-                    Line->Goto = ParseInteger(Parser);
-                }
-                else
-                {
-#if 0
-                    Panic(Parser, "Expected THEN after IF instead of %.*s", CommandBuffer->At - CommandBuffer->Contents, CommandBuffer->Contents);
-#else
-                    goto skip;
-#endif
-                }
-                if (LineNumber == 1325)
-                {
-                    printf("%.*s %d %d\n", Line->NameLength, Line->Name, Line->Integer, Line->Goto);
-                }
-            }
-            else
-            {
-#if 0
-                Panic(Parser, "Expected a variable name after IF instead of '%c'", Char);
-#else
-                goto skip;
-#endif
-            }
-        }
-        else if (CHECK_COMMAND(Line, CommandBuffer, END))
-        {
-        }
-        else if (CHECK_COMMAND(Line, CommandBuffer, DATA))
-        {
-        }
-        else if (CHECK_COMMAND(Line, CommandBuffer, ENTER))
-        {
-        }
-        else if (CHECK_COMMAND(Line, CommandBuffer, GOSUB))
-        {
-        }
-        else if (CHECK_COMMAND(Line, CommandBuffer, GOTO))
-        {
-            Line->Goto = ParseInteger(Parser);
-        }
-        else if (CHECK_COMMAND(Line, CommandBuffer, READ))
-        {
-        }
-        else if (CHECK_COMMAND(Line, CommandBuffer, RESTORE))
-        {
-        }
-        else if (CHECK_COMMAND(Line, CommandBuffer, RETURN))
-        {
-        }
-        else if (CHECK_COMMAND(Line, CommandBuffer, STOP))
-        {
-        }
-        else
-        {
-            if (CHECK_COMMAND(Line, CommandBuffer, LET))
-            {
-            }
-# if 0
-            Warn(Parser, "Unrecognized command \"%.*s\"", CommandBuffer->At - CommandBuffer->Contents, CommandBuffer->Contents);
-#endif
-        }
-    skip:
-        SkipToEndOfLine(Parser);
-    }
-    u32 NextProgramCounter;
-    while(Environment->ProgramCounter < ArrayCount(Parser->Lines))
-    {
-        NextProgramCounter = Environment->ProgramCounter + 1;
-        basic_line *Line = Parser->Lines + Environment->ProgramCounter;
-        switch (Line->Command)
-        {
-            case basic_command_NOOP:
-            case basic_command_REM:
-            {
-            } break;
-
-            case basic_command_PRINT:
-            {
-                if (Line->String)
-                {
-                    printf("%.*s\n", Line->Length, Line->String);
-                }
-                else
-                {
-                    u32 NewlineCount = Line->Length;
-                    while (NewlineCount--)
-                    {
-                        putchar('\n');
-                    }
-                }
-            } break;
-
-            case basic_command_DIM:
-            {
-                if (0 <= LookupString(Environment, Line->NameLength, Line->Name))
-                {
-                    Panic(Environment, "Attempted to DIM already DIM'd string %.*s", Line->NameLength, Line->Name);
-                }
-                u32 StringIndex = Environment->StringCount++;
-                strncpy(Environment->StringNames[StringIndex], Line->Name, Line->NameLength);
-                Environment->StringSizes[StringIndex] = Line->Dim;
-                Environment->StringPointers[StringIndex] = Environment->StringMemoryAt;
-                Environment->StringMemoryAt += Line->Dim;
-            } break;
-
-            case basic_command_INPUT:
-            {
-                printf("? ");
-                if (Line->IsString)
-                {
-                    s32 StringIndex = LookupString(Environment, Line->NameLength, Line->Name);
-                    if (StringIndex < 0)
-                    {
-                        Panic(Environment, "Attempted to INPUT an unDIM'd string %.*s", Line->NameLength, Line->Name);
-                    }
-                    buffer Buffer = NewBuffer(Environment->StringMemory + Environment->StringPointers[StringIndex], Environment->StringSizes[StringIndex]);
-                    memset(Buffer.Contents, 0, Buffer.Size);
-                    u8 TimeUp = 0;
-                    time_t StartTime, EndTime;
-                    time(&StartTime);
-                    while (read(stdin, &Char, 1) || (!TimeUp && Char != '\n'))
-                    {
-                        if (!Full(&Buffer))
-                        {
-                            *Buffer.At++ = Char;
-                        }
-                        time(&EndTime);
-                        TimeUp = TimeAllowed < difftime(EndTime, StartTime)
-                        usleep(50);
-                    }
-                }
-                else
-                {
-                    u32 IntegerIndex = LookupInteger(Environment, Line->NameLength, Line->Name);
-                    s32 *IntegerValue = Environment->IntegerMemory + IntegerIndex;
-                    *IntegerValue = 0;
-                    u8 TimeUp = 0;
-                    time_t StartTime, EndTime;
-                    time(&StartTime);
-                    while (read(stdin, &Char, 1) || (!TimeUp && Char != '\n'))
-                    {
-                        if (isdigit(Char))
-                        {
-                            *IntegerValue = 10 * *IntegerValue + Char - '0';
-                        }
-                        time(&EndTime);
-                        TimeUp = TimeAllowed < difftime(EndTime, StartTime)
-                        usleep(50);
-                    }
-                }
-            } break;
-
-            case basic_command_IF:
-            {
-                if (Line->IsString)
-                {
-                    s32 StringIndex = LookupString(Environment, Line->NameLength, Line->Name);
-                    if (StringIndex < 0)
-                    {
-                        Panic(Environment, "Attempted to IF on an unDIM'd string %.*s", Line->NameLength, Line->Name);
-                    }
-                    char *String = Environment->StringMemory + Environment->StringPointers[StringIndex];
-                    u32 StringLength = Environment->StringSizes[StringIndex];
-                    switch(Line->Operator)
-                    {
-                        case basic_operator_EQ:
-                        {
-                            if (0 == strncmp(String, Line->String, Min(StringLength, Line->Length)))
-                            {
-                                NextProgramCounter = Line->Goto;
-                            }
-                        } break;
-                        default:
-                        {
-                            Panic(Environment, "Unsupported operator for IF");
-                        }
-                    }
-                }
-                else
-                {
-                    s32 IntegerIndex = LookupInteger(Environment, Line->NameLength, Line->Name);
-                    u32 IntegerValue = Environment->IntegerMemory[IntegerIndex];
-                    switch (Line->Operator)
-                    {
-                        case basic_operator_EQ:
-                        {
-                            if (IntegerValue == Line->Integer)
-                            {
-                                NextProgramCounter = Line->Goto;
-                            }
-                        } break;
-                        case basic_operator_LT:
-                        {
-                            if (IntegerValue < Line->Integer)
-                            {
-                                NextProgramCounter = Line->Goto;
-                            }
-                        } break;
-                        case basic_operator_GT:
-                        {
-                            if (IntegerValue > Line->Integer)
-                            {
-                                NextProgramCounter = Line->Goto;
-                            }
-                        } break;
-                        case basic_operator_LTE:
-                        {
-                            if (IntegerValue <= Line->Integer)
-                            {
-                                NextProgramCounter = Line->Goto;
-                            }
-                        } break;
-                        case basic_operator_GTE:
-                        {
-                            if (IntegerValue >= Line->Integer)
-                            {
-                                NextProgramCounter = Line->Goto;
-                            }
-                        } break;
-                    }
-                    // implement integer if
-                }
-            } break;
-
-            case basic_command_GOTO:
-            {
-                NextProgramCounter = Line->Goto;
-            } break;
-
-            default:
-            {
-            } break;
-        }
-        printf("NextProgramCounter: %d\n", NextProgramCounter);
-        Environment->ProgramCounter = NextProgramCounter;
-    }
-    #endif
     return 0;
 }
