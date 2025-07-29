@@ -2029,23 +2029,27 @@ void EvaluatePrint(environment *Environment, lexeme *Print)
 {
     lexeme *Args = Print->Left;
     lexeme *Expr = 0;
+    s32 NextPrefixWidth, PrefixWidth;
     char NextPrefix, Prefix;
-    Prefix = NextPrefix = 0;
+    Prefix = 0;
     u8 SuppressNewline = 0;
+    s32 PrintCursor = 0;
+    u8 IsTab = 0;
     while (Args)
     {
-        SuppressNewline = NextPrefix = 0;
+        IsTab = SuppressNewline = NextPrefix = 0;
+        NextPrefixWidth = 1;
         switch (Args->Type)
         {
             case token_type_COMMA:
             {
                 Expr = Args->Left;
-                SuppressNewline = NextPrefix = '\t';
+                IsTab = 1;
             } break;
             case token_type_SEMICOLON:
             {
                 Expr = Args->Left;
-                SuppressNewline = NextPrefix = '\t';
+                SuppressNewline = 1;
             } break;
             case token_type_LIN:
             {
@@ -2061,6 +2065,16 @@ void EvaluatePrint(environment *Environment, lexeme *Print)
         {
             lexeme Value;
             EvaluateExpression(Environment, Expr, &Value);
+            const char *LeftPad = "";
+            s32 MinWidth = 0;
+            if (Value.Type == token_type_INTEGER)
+            {
+                MinWidth = 5;
+                if (0 <= Value.Integer)
+                {
+                    LeftPad = " ";
+                }
+            }
             temporary_memory TemporaryMemory = BeginTemporaryMemory(&Environment->Parser.StringArena);
             ToString(Environment, &Value, &Value);
             if (Value.Type != token_type_STRING)
@@ -2069,11 +2083,23 @@ void EvaluatePrint(environment *Environment, lexeme *Print)
             }
             if (Prefix)
             {
-                putchar(Prefix);
+                s32 Before = PrintCursor;
+                PrintCursor += printf("%*c", PrefixWidth, Prefix);
             }
-            printf("%.*s", Value.String.Length, Value.String.Memory);
+            PrintCursor += printf("%s%-*.*s", LeftPad, MinWidth, Value.String.Length, Value.String.Memory);
             EndTemporaryMemory(&Environment->Parser.StringArena, TemporaryMemory);
         }
+        if (IsTab)
+        {
+            if (56 <= PrintCursor)
+            {
+                // TODO
+            }
+            s32 CurrentWidth = PrintCursor % 15;
+            NextPrefixWidth = 15 - CurrentWidth;
+            NextPrefix = ' ';
+        }
+        PrefixWidth = NextPrefixWidth;
         Prefix = NextPrefix;
         Args = Args->Right;
     }
