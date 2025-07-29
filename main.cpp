@@ -2283,16 +2283,20 @@ void EvaluateInput(environment *Environment, lexeme *Lexeme)
                 Integer = 10 * Integer + Char - '0';
                 Char = getchar();
             }
-            if (Char != '\n')
+            if (Again && Multiplier < 0)
+            {
+                printf("BAD INPUT, RETYPE FROM ITEM 1\n");
+            }
+            else if (Char != '\n')
             {
                 printf("EXTRA INPUT - WARNING ONLY\n");
-                do
-                {
+            }
+            while (Char != '\n')
+            {
 #if DEBUG_TIMED_INPUT
-                    printf("Char: %c(%d)\n", Char, Char);
+                printf("Char: %c(%d)\n", Char, Char);
 #endif
-                    Char = getchar();
-                } while (Char != '\n');
+                Char = getchar();
             }
             Variable->Type = token_type_INTEGER;
             Variable->Integer = Multiplier * Integer;
