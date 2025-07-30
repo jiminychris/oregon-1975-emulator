@@ -217,6 +217,13 @@ const char *BasicCommandNames[] =
     BASIC_COMMANDS(CREATE_STRING)
 };
 
+struct timed_input
+{
+    s32 TimeoutMilliseconds;
+    s32 Polled;
+    s32 TimedOut;
+};
+
 struct lexeme
 {
     token_type Type;
@@ -430,13 +437,35 @@ void UngetChar(parser *Parser)
     }
 }
 
-s8 GetChar(environment *Environment)
+s8 GetChar(environment *Environment, timed_input *TimedInput = 0)
 {
+    pollfd FileDescriptor;
+    FileDescriptor.fd = STDIN_FILENO;
+    FileDescriptor.events = POLLIN;
+    timed_input Default = {};
+    Default.TimeoutMilliseconds = -1;
+    if (!TimedInput)
+    {
+        TimedInput = &Default;
+    }
+
     char Char = getchar();
-    if (Char != EOF && !Environment->IsInteractive)
+    if (Char == EOF)
+    {
+        TimedInput->Polled = Environment->IsInteractive = 1;
+        TimedInput->TimedOut = poll(&FileDescriptor, 1, TimedInput->TimeoutMilliseconds) <= 0;
+        if (!TimedInput->TimedOut)
+        {
+            Char = getchar();
+        }
+    }
+    else if (!Environment->IsInteractive)
     {
         putchar(Char);
     }
+#if DEBUG_TIMED_INPUT
+    printf("Char: %c(%d)\n", Char, Char);
+#endif
     return Char;
 }
 
@@ -2164,69 +2193,37 @@ s32 StringInput(environment *Environment, lexeme *Id, r32 AllowedSeconds = -1, l
     }
     s32 Char = 0;
     buffer Buffer = NewBuffer(Variable->String.Memory, Variable->Integer);
-    u64 ElapsedMilliseconds = 0;
-    u64 StartTimeMilliseconds;
-    s32 TimedOut = 0;
-    StartTimeMilliseconds = GetTimeMilliseconds();
-    if (AllowedSeconds < 0)
+    s32 ElapsedMilliseconds = 0;
+    u64 StartTimeMilliseconds = GetTimeMilliseconds();
+    timed_input TimedInput;
+    s32 AllowedMilliseconds = TimedInput.TimeoutMilliseconds = AllowedSeconds * 1000;
+    s32 MinTimeoutMilliseconds = AllowedMilliseconds < 0 ? AllowedMilliseconds : 0;
+
+    do
     {
-        while ((Char = GetChar(Environment)) != '\n')
+        Char = GetChar(Environment, &TimedInput);
+        if (TimedInput.TimedOut)
         {
-#if DEBUG_TIMED_INPUT
-            printf("Char: %c(%d)\n", Char, Char);
-#endif
-            if (!Full(&Buffer))
+            Buffer.At = Buffer.Contents;
+            ElapsedMilliseconds = AllowedMilliseconds;
+        }
+        else
+        {
+            if (TimedInput.Polled)
+            {
+                ElapsedMilliseconds = GetTimeMilliseconds() - StartTimeMilliseconds;
+                TimedInput.TimeoutMilliseconds = Max(MinTimeoutMilliseconds, AllowedMilliseconds - ElapsedMilliseconds);
+            }
+            if (Char != '\n' && !Full(&Buffer))
             {
                 *Buffer.At++ = Char;
             }
-        };
-        ElapsedMilliseconds = GetTimeMilliseconds() - StartTimeMilliseconds;
-    }
-    else
-    {
-#if DEBUG_TIMED_INPUT
-    printf("poll() StartTimeMilliseconds: %llu\n", StartTimeMilliseconds);
-#endif
-        int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
-        fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
-pollfd FileDescriptor;
-        FileDescriptor.fd = STDIN_FILENO;
-        FileDescriptor.events = POLLIN;
-
-        u64 RemainingMilliseconds;
-        u64 AllowedMilliseconds;
-        RemainingMilliseconds = AllowedMilliseconds = AllowedSeconds * 1000;
-
-        do
-        {
-            Char = GetChar(Environment);
-            if (Char == EOF)
-            {
-                // TODO: Centralize input so we can make it all non-blocking and know when to turn interactive flag on.
-                Environment->IsInteractive = 1;
-                if (0 < poll(&FileDescriptor, 1, RemainingMilliseconds))
-                {
-                    ElapsedMilliseconds = Min(AllowedMilliseconds, GetTimeMilliseconds() - StartTimeMilliseconds);
-                }
-                else
-                {
-                    TimedOut = 1;
-                    Buffer.At = Buffer.Contents;
-                    ElapsedMilliseconds = AllowedMilliseconds;
-                }
-                RemainingMilliseconds = AllowedMilliseconds - ElapsedMilliseconds;
-            }
-            else if (Char != '\n' && !Full(&Buffer))
-            {
-                *Buffer.At++ = Char;
-            }
-        } while (!TimedOut && Char != '\n');
-        fcntl(STDIN_FILENO, F_SETFL, flags);
-    }
+        }
+    } while (!TimedInput.TimedOut && Char != '\n');
 
     if (SecondsElapsed)
     {
-        if (TimedOut)
+        if (TimedInput.TimedOut)
         {
             SecondsElapsed->Type = token_type_INTEGER;
             SecondsElapsed->Integer = -256;
@@ -2277,9 +2274,6 @@ void EvaluateInput(environment *Environment, lexeme *Lexeme)
             while (isdigit(Char))
             {
                 Again = 0;
-#if DEBUG_TIMED_INPUT
-                printf("Char: %c(%d)\n", Char, Char);
-#endif
                 Integer = 10 * Integer + Char - '0';
                 Char = GetChar(Environment);
             }
@@ -2293,9 +2287,6 @@ void EvaluateInput(environment *Environment, lexeme *Lexeme)
             }
             while (Char != '\n')
             {
-#if DEBUG_TIMED_INPUT
-                printf("Char: %c(%d)\n", Char, Char);
-#endif
                 Char = GetChar(Environment);
             }
             Variable->Type = token_type_INTEGER;
@@ -2676,6 +2667,8 @@ int Test(environment *Environment)
 
 int main(int ArgCount, char *Args[])
 {
+    int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+    fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
     setvbuf(stdout, NULL, _IONBF, 0);
     char StringMemory[65536];
     environment Environment;
