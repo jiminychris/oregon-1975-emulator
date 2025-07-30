@@ -448,11 +448,13 @@ s8 GetChar(environment *Environment, timed_input *TimedInput = 0)
     {
         TimedInput = &Default;
     }
+    TimedInput->TimedOut = 0;
 
     char Char = getchar();
-    if (Char == EOF)
+    TimedInput->Polled = (Char == EOF);
+    if (TimedInput->Polled)
     {
-        TimedInput->Polled = Environment->IsInteractive = 1;
+        Environment->IsInteractive = 1;
         TimedInput->TimedOut = poll(&FileDescriptor, 1, TimedInput->TimeoutMilliseconds) <= 0;
         if (!TimedInput->TimedOut)
         {
@@ -2202,6 +2204,10 @@ s32 StringInput(environment *Environment, lexeme *Id, r32 AllowedSeconds = -1, l
     do
     {
         Char = GetChar(Environment, &TimedInput);
+#if DEBUG_TIMED_INPUT
+        printf("TimedOut: %d\n", TimedInput.TimedOut);
+        printf("Polled: %d\n", TimedInput.Polled);
+#endif
         if (TimedInput.TimedOut)
         {
             Buffer.At = Buffer.Contents;
