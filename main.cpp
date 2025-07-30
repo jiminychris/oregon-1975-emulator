@@ -44,6 +44,16 @@ s32 Max(s32 A, s32 B)
     return A > B ? A : B;
 }
 
+u64 Min(u64 A, u64 B)
+{
+    return A < B ? A : B;
+}
+
+u64 Max(u64 A, u64 B)
+{
+    return A > B ? A : B;
+}
+
 r32 Min(r32 A, r32 B)
 {
     return A < B ? A : B;
@@ -2129,7 +2139,7 @@ u64 GetTimeMilliseconds()
     return Result;
 }
 
-s32 StringInput(environment *Environment, lexeme *Id, r32 SecondsAllowed = -1, lexeme *SecondsElapsed = 0)
+s32 StringInput(environment *Environment, lexeme *Id, r32 AllowedSeconds = -1, lexeme *SecondsElapsed = 0)
 {
     lexeme *Variable = FindVariable(Environment, Id);
     if (!Variable)
@@ -2143,11 +2153,10 @@ s32 StringInput(environment *Environment, lexeme *Id, r32 SecondsAllowed = -1, l
     s32 Char = 0;
     buffer Buffer = NewBuffer(Variable->String.Memory, Variable->Integer);
     u64 ElapsedMilliseconds = 0;
-    u64 StartTimeMilliseconds, EndTimeMilliseconds;
+    u64 StartTimeMilliseconds;
     s32 TimedOut = 0;
     StartTimeMilliseconds = GetTimeMilliseconds();
-    EndTimeMilliseconds = StartTimeMilliseconds;
-    if (SecondsAllowed < 0)
+    if (AllowedSeconds < 0)
     {
         while ((Char = getchar()) != '\n')
         {
@@ -2159,8 +2168,7 @@ s32 StringInput(environment *Environment, lexeme *Id, r32 SecondsAllowed = -1, l
                 *Buffer.At++ = Char;
             }
         };
-        EndTimeMilliseconds = GetTimeMilliseconds();
-        ElapsedMilliseconds = EndTimeMilliseconds - StartTimeMilliseconds;
+        ElapsedMilliseconds = GetTimeMilliseconds() - StartTimeMilliseconds;
     }
     else
     {
@@ -2173,54 +2181,32 @@ pollfd FileDescriptor;
         FileDescriptor.fd = STDIN_FILENO;
         FileDescriptor.events = POLLIN;
 
-        s64 MillisecondsRemaining;
-        u64 MillisecondsAllowed;
-        MillisecondsRemaining = MillisecondsAllowed = SecondsAllowed * 1000;
+        u64 RemainingMilliseconds;
+        u64 AllowedMilliseconds;
+        RemainingMilliseconds = AllowedMilliseconds = AllowedSeconds * 1000;
 
         do
         {
-            s32 FileDescriptorsReady = poll(&FileDescriptor, 1, MillisecondsRemaining);
-#if DEBUG_TIMED_INPUT
-            printf("poll() FileDescriptorsReady: %d\n", FileDescriptorsReady);
-#endif
-            if (FileDescriptorsReady > 0)
+            Char = getchar();
+            if (Char == EOF)
             {
-                do
+                if (0 < poll(&FileDescriptor, 1, RemainingMilliseconds))
                 {
-                    Char = getchar();
-                    if (Char == '\n' || Char == EOF)
-                    {
-                        break;
-                    }
-#if DEBUG_TIMED_INPUT
-                    printf("poll() Char: %c(%d)\n", Char, Char);
-#endif
-                    if (!Full(&Buffer))
-                    {
-                        *Buffer.At++ = Char;
-                    }
-                } while (1);
-                EndTimeMilliseconds = GetTimeMilliseconds();
-#if DEBUG_TIMED_INPUT
-                printf("poll() EndTimeMilliseconds: %llu\n", EndTimeMilliseconds);
-#endif
-                ElapsedMilliseconds = EndTimeMilliseconds - StartTimeMilliseconds;
-                MillisecondsRemaining = MillisecondsAllowed - ElapsedMilliseconds;
+                    ElapsedMilliseconds = Min(AllowedMilliseconds, GetTimeMilliseconds() - StartTimeMilliseconds);
+                }
+                else
+                {
+                    TimedOut = 1;
+                    Buffer.At = Buffer.Contents;
+                    ElapsedMilliseconds = AllowedMilliseconds;
+                }
+                RemainingMilliseconds = AllowedMilliseconds - ElapsedMilliseconds;
             }
-            else
+            else if (Char != '\n' && !Full(&Buffer))
             {
-                TimedOut = 1;
-                Buffer.At = Buffer.Contents;
-                ElapsedMilliseconds = MillisecondsAllowed;
-                MillisecondsRemaining = 0;
+                *Buffer.At++ = Char;
             }
-#if DEBUG_TIMED_INPUT
-            printf("poll() MillisecondsRemaining: %llu\n", MillisecondsRemaining);
-#endif
-        } while (MillisecondsRemaining > 0 && Char != '\n');
-#if DEBUG_TIMED_INPUT
-        printf("poll() ElapsedMilliseconds: %llu\n", ElapsedMilliseconds);
-#endif
+        } while (!TimedOut && Char != '\n');
         fcntl(STDIN_FILENO, F_SETFL, flags);
     }
 
@@ -2234,7 +2220,7 @@ pollfd FileDescriptor;
         else
         {
             SecondsElapsed->Type = token_type_REAL;
-            SecondsElapsed->Real = Min(ElapsedMilliseconds * 0.001f, SecondsAllowed);
+            SecondsElapsed->Real = ElapsedMilliseconds * 0.001f;
         }
     }
     
