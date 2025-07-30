@@ -1539,7 +1539,8 @@ lexeme *NumberOperation(environment *Environment, lexeme *Operator, lexeme *Outp
             } break;
             case token_type_SLASH:
             {
-                Output->Integer = LHS.Integer / RHS.Integer;
+                Output->Type = token_type_REAL;
+                Output->Real = (r32)LHS.Integer / (r32)RHS.Integer;
             } break;
             case token_type_CARET:
             {
@@ -2201,6 +2202,8 @@ pollfd FileDescriptor;
             Char = GetChar(Environment);
             if (Char == EOF)
             {
+                // TODO: Centralize input so we can make it all non-blocking and know when to turn interactive flag on.
+                Environment->IsInteractive = 1;
                 if (0 < poll(&FileDescriptor, 1, RemainingMilliseconds))
                 {
                     ElapsedMilliseconds = Min(AllowedMilliseconds, GetTimeMilliseconds() - StartTimeMilliseconds);
@@ -2601,7 +2604,7 @@ int ExpressionTest(environment *Environment, string_reference ExpressionString, 
     return Result;
 }
 
-#define EPSILON 0.000001f
+#define EPSILON 0.00001f
 
 int AboutEqual(r32 A, r32 B)
 {
@@ -2649,6 +2652,7 @@ int Test(environment *Environment)
     Result += EXPRESSION_TEST(Environment, "1 AND 1", "(1 AND 1)", 1 && 1);
     Result += EXPRESSION_TEST(Environment, "1 AND 1 OR 1", "((1 AND 1) OR 1)", 1 && 1 || 1);
     Result += EXPRESSION_TEST(Environment, "1 OR 1 AND 1", "(1 OR (1 AND 1))", 1 || 1 && 1);
+    Result += EXPRESSION_TEST(Environment, "32+2/3*18", "(32+((2/3)*18))", 32+2.0f/3.0f*18);
     Result += EXPRESSION_TEST(Environment, "1+2*3+4", "((1+(2*3))+4)", 1+2*3+4);
     Result += EXPRESSION_TEST(Environment, "1*2+3*4", "((1*2)+(3*4))", 1*2+3*4);
     Result += EXPRESSION_TEST(Environment, "1*2=3*4", "((1*2)=(3*4))", 1*2==3*4);
@@ -2661,12 +2665,12 @@ int Test(environment *Environment)
     Result += EXPRESSION_TEST(Environment, "1+2*3", "(1+(2*3))", 1+2*3);
     Result += EXPRESSION_TEST(Environment, "(1+2)*3", "((1+2)*3)", (1+2)*3);
     Result += EXPRESSION_TEST(Environment, "0.5*10", "(0.5*10)", 0.5*10);
-    Result += EXPRESSION_TEST(Environment, "(20/100-4)^2+72", "((((20/100)-4)^2)+72)", pow(20/100-4,2)+72);
-    Result += EXPRESSION_TEST(Environment, "(20/100-4)^2+12", "((((20/100)-4)^2)+12)", pow(20/100-4,2)+12);
-    Result += EXPRESSION_TEST(Environment, "((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1)", (pow(20/100-4,2)+72)/(pow(20/100-4,2)+12)-1);
-    Result += EXPRESSION_TEST(Environment, "0.5*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.5*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.5*10>(pow(20/100-4,2)+72)/(pow(20/100-4,2)+12)-1);
-    Result += EXPRESSION_TEST(Environment, "0.3*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.3*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.3*10>(pow(20/100-4,2)+72)/(pow(20/100-4,2)+12)-1);
-    Result += EXPRESSION_TEST(Environment, "0.2*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.2*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.2*10>(pow(20/100-4,2)+72)/(pow(20/100-4,2)+12)-1);
+    Result += EXPRESSION_TEST(Environment, "(20/100-4)^2+72", "((((20/100)-4)^2)+72)", pow(20.0f/100-4,2)+72);
+    Result += EXPRESSION_TEST(Environment, "(20/100-4)^2+12", "((((20/100)-4)^2)+12)", pow(20.0f/100-4,2)+12);
+    Result += EXPRESSION_TEST(Environment, "((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1)", (pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
+    Result += EXPRESSION_TEST(Environment, "0.5*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.5*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.5*10>(pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
+    Result += EXPRESSION_TEST(Environment, "0.3*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.3*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.3*10>(pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
+    Result += EXPRESSION_TEST(Environment, "0.2*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.2*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.2*10>(pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
     return Result;
 }
 
