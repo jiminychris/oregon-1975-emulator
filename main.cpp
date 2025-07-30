@@ -267,6 +267,7 @@ struct parser
 
 struct environment
 {
+    s32 IsInteractive;
     lexeme *Goto;
     string_reference VariableNames[64];
     lexeme VariableValues[64];
@@ -427,6 +428,16 @@ void UngetChar(parser *Parser)
     {
         Parser->Position--;
     }
+}
+
+s8 GetChar(environment *Environment)
+{
+    char Char = getchar();
+    if (Char != EOF && !Environment->IsInteractive)
+    {
+        putchar(Char);
+    }
+    return Char;
 }
 
 s8 GetChar(parser *Parser)
@@ -2158,7 +2169,7 @@ s32 StringInput(environment *Environment, lexeme *Id, r32 AllowedSeconds = -1, l
     StartTimeMilliseconds = GetTimeMilliseconds();
     if (AllowedSeconds < 0)
     {
-        while ((Char = getchar()) != '\n')
+        while ((Char = GetChar(Environment)) != '\n')
         {
 #if DEBUG_TIMED_INPUT
             printf("Char: %c(%d)\n", Char, Char);
@@ -2187,7 +2198,7 @@ pollfd FileDescriptor;
 
         do
         {
-            Char = getchar();
+            Char = GetChar(Environment);
             if (Char == EOF)
             {
                 if (0 < poll(&FileDescriptor, 1, RemainingMilliseconds))
@@ -2250,15 +2261,15 @@ void EvaluateInput(environment *Environment, lexeme *Lexeme)
             lexeme *Variable = LookupOrDeclareVariable(Environment, Lexeme);
             s32 Integer = 0;
             s32 Multiplier = 1;
-            Char = getchar();
+            Char = GetChar(Environment);
             while (!(Char == '-' || Char == '\n' || isdigit(Char)))
             {
-                Char = getchar();
+                Char = GetChar(Environment);
             }
             if (Char == '-')
             {
                 Multiplier = -1;
-                Char = getchar();
+                Char = GetChar(Environment);
             }
             while (isdigit(Char))
             {
@@ -2267,7 +2278,7 @@ void EvaluateInput(environment *Environment, lexeme *Lexeme)
                 printf("Char: %c(%d)\n", Char, Char);
 #endif
                 Integer = 10 * Integer + Char - '0';
-                Char = getchar();
+                Char = GetChar(Environment);
             }
             if (Again && Multiplier < 0)
             {
@@ -2282,7 +2293,7 @@ void EvaluateInput(environment *Environment, lexeme *Lexeme)
 #if DEBUG_TIMED_INPUT
                 printf("Char: %c(%d)\n", Char, Char);
 #endif
-                Char = getchar();
+                Char = GetChar(Environment);
             }
             Variable->Type = token_type_INTEGER;
             Variable->Integer = Multiplier * Integer;
@@ -2664,6 +2675,7 @@ int main(int ArgCount, char *Args[])
     setvbuf(stdout, NULL, _IONBF, 0);
     char StringMemory[65536];
     environment Environment;
+    Environment.IsInteractive = isatty(STDIN_FILENO);
     parser *Parser = &Environment.Parser;
     Parser->StringArena.Memory = StringMemory;
     Parser->StringArena.Size = sizeof StringMemory;
