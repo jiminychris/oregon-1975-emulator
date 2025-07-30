@@ -8,6 +8,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <poll.h>
+#include <sys/stat.h>
 
 #include "primitives.h"
 
@@ -20,6 +21,7 @@
 #define DEBUG_EVAL_IF 0
 #define DEBUG_STRING_INPUT 0
 #define DEBUG_TIMED_INPUT 0
+#define DEBUG_MACH_O 0
 
 #define ArrayCount(Array) (sizeof(Array) / sizeof(Array[0]))
 #define Assert(Expr) {if(!(Expr)) int __AssertInt = *((volatile int *)0);}
@@ -2671,6 +2673,52 @@ int Test(environment *Environment)
     return Result;
 }
 
+#pragma pack(push, 1)
+enum load_command_type
+{
+    load_command_type_SegmentLoad = 0x00000019,
+};
+union magic_number
+{
+    u32 Integer;
+    char String[4];
+};
+
+struct mach_o_64_bit_header
+{
+    magic_number MagicNumber;
+    struct
+    {
+        u32 CpuType;
+        u32 CpuSubtype;
+        u32 FileType;
+        u32 NumberOfLoadCommands;
+        u32 SizeOfLoadCommands;
+        u32 Flags;
+        u32 Reserved;
+    } Data;
+};
+
+struct load_command_header
+{
+    u32 Type;
+    u32 Size;
+};
+
+struct segment_load_command_64_bit
+{
+    char SegmentName[16];
+    u64 Address;
+    u64 AddressSize;
+    u64 FileOffset;
+    u64 Size;
+    u32 MaximumVirtualMemoryProtections;
+    u32 InitialVirtualMemoryProtections;
+    u32 NumberOfSections;
+    u32 Flag32;
+};
+#pragma pack(pop)
+
 int main(int ArgCount, char *Args[])
 {
     int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
@@ -2690,8 +2738,131 @@ int main(int ArgCount, char *Args[])
     Assert(!TestResult);
 #endif
     Reset(&Environment);
+    u64 ExeSize = 0;
+    FILE *Executable = fopen(Args[0], "rb");
+    magic_number MagicNumber;
+    magic_number Mach64Bit = {0xfeedfacf};
+    fread(&MagicNumber.String, sizeof MagicNumber.String, 1, Executable);
+    if (Mach64Bit.Integer == MagicNumber.Integer)
     {
-        FILE *Executable = fopen(Args[0], "rb");
+        mach_o_64_bit_header Header;
+        Header.MagicNumber = MagicNumber;
+        fread(&Header.Data, sizeof Header.Data, 1, Executable);
+#if DEBUG_MACH_O
+        printf("MagicNumber: %u (0x%0x)\n", Header.MagicNumber.Integer, Header.MagicNumber.Integer);
+        printf("CpuType: %u\n", Header.Data.CpuType);
+        printf("CpuSubtype: %u\n", Header.Data.CpuSubtype);
+        printf("FileType: %u\n", Header.Data.FileType);
+        printf("NumberOfLoadCommands: %u\n", Header.Data.NumberOfLoadCommands);
+        printf("SizeOfLoadCommands: %u\n", Header.Data.SizeOfLoadCommands);
+        printf("Flags: %u\n", Header.Data.Flags);
+        printf("Reserved: %u\n", Header.Data.Reserved);
+#endif
+        load_command_header LoadCommandHeader;
+        s32 LoadCommandCounter = Header.Data.NumberOfLoadCommands;
+        u32 SizeOfLoadCommands = 0;
+        while (LoadCommandCounter--)
+        {
+            fread(&LoadCommandHeader, sizeof LoadCommandHeader, 1, Executable);
+            SizeOfLoadCommands += LoadCommandHeader.Size;
+#if DEBUG_MACH_O
+            printf("Command Type: %u (0x%0x)\n", LoadCommandHeader.Type, LoadCommandHeader.Type);
+            printf("Command Size: %u\n", LoadCommandHeader.Size);
+#endif
+            if (LoadCommandHeader.Type == load_command_type_SegmentLoad)
+            {
+                segment_load_command_64_bit SegmentLoadCommand;
+                fread(&SegmentLoadCommand, sizeof SegmentLoadCommand, 1, Executable);
+#if DEBUG_MACH_O
+                printf("Segment Load Segment Name: %s\n", SegmentLoadCommand.SegmentName);
+                printf("Segment Load File Offset: %llu\n", SegmentLoadCommand.FileOffset);
+                printf("Segment Load Size: %llu\n", SegmentLoadCommand.Size);
+#endif
+                ExeSize = Max(ExeSize, SegmentLoadCommand.FileOffset + SegmentLoadCommand.Size);
+                fseek(Executable, LoadCommandHeader.Size - sizeof LoadCommandHeader - sizeof SegmentLoadCommand, SEEK_CUR);
+            }
+            else
+            {
+                fseek(Executable, LoadCommandHeader.Size - sizeof LoadCommandHeader, SEEK_CUR);
+            }
+        }
+        Assert(SizeOfLoadCommands == Header.Data.SizeOfLoadCommands);
+
+#if DEBUG_MACH_O
+        printf("ExeSize: %llu\n", ExeSize);
+#endif
+    }
+    else
+    {
+        Panic(Parser, "Unsupported executable type %0xd\n", MagicNumber.Integer);
+    }
+
+    fseek(Executable, 0, SEEK_END);
+    u64 ExecutableFileSize = ftell(Executable);
+    if (ExecutableFileSize == ExeSize)
+    {
+        if (ArgCount < 2)
+        {
+            Panic(Parser, "Usage: %s [-x] <source_code_file>", Args[0]);
+        }
+        char *FirstArg = Args[1];
+        if (0 == strcmp(FirstArg, "-x"))
+        {
+            if (ArgCount < 3)
+            {
+                Panic(Parser, "-x option requires a filename parameter");
+            }
+            char *SecondArg = Args[2];
+            char NewExecutableName[256];
+            char *Dest = NewExecutableName;
+            char *End = Dest + sizeof NewExecutableName - 1;
+            char *Source = SecondArg;
+            do
+            {
+                if (*Source == '/')
+                {
+                    Source++;
+                    Dest = NewExecutableName;
+                }
+                *Dest++ = *Source++;
+            } while (Dest < End && *Source && *Source != '.');
+            *Dest = 0;
+            FILE *NewExecutable = fopen(NewExecutableName, "wb");
+            FILE *SourceCodeFile = fopen(SecondArg, "rb");
+
+            u8 Buffer[1024*1024];
+            size_t BytesRead;
+            fseek(Executable, 0, SEEK_SET);
+            do
+            {
+                BytesRead = fread(Buffer, 1, sizeof Buffer, Executable);
+                fwrite(Buffer, BytesRead, 1, NewExecutable);
+            } while (BytesRead);
+            do
+            {
+                BytesRead = fread(Buffer, 1, sizeof Buffer, SourceCodeFile);
+                fwrite(Buffer, BytesRead, 1, NewExecutable);
+            } while (BytesRead);
+            fwrite(&ExeSize, sizeof ExeSize, 1, NewExecutable);
+            fclose(NewExecutable);
+            fclose(SourceCodeFile);
+            chmod(NewExecutableName, 0755);
+            return 0;
+        }
+        else
+        {
+            FILE *SourceCodeFile = fopen(FirstArg, "rb");
+
+            fseek(SourceCodeFile, 0, SEEK_END);
+            Parser->Size = ftell(SourceCodeFile);
+            fseek(SourceCodeFile, 0, SEEK_SET);
+            Parser->Contents = (u8 *)malloc(Parser->Size);
+            fread(Parser->Contents, Parser->Size, 1, SourceCodeFile);
+            fclose(SourceCodeFile);
+        }
+    }
+    else if (ExeSize < ExecutableFileSize)
+    {
         u64 DataFileStart;
         fseek(Executable, -sizeof DataFileStart, SEEK_END);
         size_t DataFileEnd = ftell(Executable);
@@ -2701,8 +2872,13 @@ int main(int ArgCount, char *Args[])
         Parser->Size = DataFileEnd - DataFileStart;
         Parser->Contents = (u8 *)malloc(Parser->Size);
         fread(Parser->Contents, Parser->Size, 1, Executable);
-        fclose(Executable);
     }
+    else
+    {
+        Panic(Parser, "Actual executable file size is less than the size calculated from file format (%llu < %llu)", ExecutableFileSize, ExeSize);
+    }
+    fclose(Executable);
+
     Lex(Parser);
 #if DEBUG_LEXER
     DebugLexer(Parser);
