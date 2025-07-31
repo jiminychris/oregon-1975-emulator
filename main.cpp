@@ -478,6 +478,7 @@ s8 GetChar(environment *Environment, timed_input *TimedInput = 0)
     else if (!Environment->IsInteractive)
     {
         putchar(Char);
+        fflush(stdout);
     }
 #if DEBUG_TIMED_INPUT
     printf("Char: %c(%d)\n", Char, Char);
