@@ -81,7 +81,8 @@ struct string_reference
     char *Memory;
 };
 
-#define STRING_REFERENCE(StringLiteral) {sizeof (StringLiteral) - 1, (char*)(StringLiteral)}
+#define STRING_REFERENCE(StringLiteral) (string_reference){sizeof (StringLiteral) - 1, (char*)(StringLiteral)}
+#define BUFFER(StringLiteral) (buffer){sizeof (StringLiteral) - 1, (char*)(StringLiteral), (char*)(StringLiteral) + sizeof (StringLiteral) - 1, (char*)(StringLiteral) + sizeof (StringLiteral) - 1}
 
 enum operator_precedence
 {
@@ -626,28 +627,35 @@ buffer NewBuffer(char *Contents, size_t Size)
     return Result;
 }
 
-#define NEW_BUFFER(BufferName, BufferSize)                          \
-    char __##BufferName[(BufferSize)];                              \
-    buffer _##BufferName = NewBuffer(__##BufferName, (BufferSize)); \
-    buffer *BufferName = &_##BufferName;
-
 void Reset(buffer *Buffer)
 {
     Buffer->At = Buffer->Contents;
 }
 
-s32 Full(buffer *Buffer)
+s32 Full(buffer Buffer)
 {
-    return Buffer->End <= Buffer->At;
+    return Buffer.End <= Buffer.At;
 }
 
-s32 Equals(buffer *Buffer, const char *String)
+string_reference StringReference(buffer Buffer)
 {
-    return 0 == strncmp(String, Buffer->Contents, Buffer->At - Buffer->Contents);
+    string_reference Result;
+    Result.Memory = Buffer.Contents;
+    Result.Length = Buffer.At - Buffer.Contents;
+    return Result;
 }
+
 s32 Equals(string_reference A, string_reference B)
 {
-    return (A.Length == B.Length) && (0 == strncmp(A.Memory, B.Memory, A.Length));
+    s32 BufferCountdown = A.Length;
+    char *AAt = A.Memory;
+    char *BAt = B.Memory;
+    u8 Result = A.Length == B.Length;
+    while (Result && BufferCountdown--)
+    {
+        Result = (*AAt++ == *BAt++);
+    }
+    return Result;
 }
 
 lexeme *FindVariable(environment *Environment, lexeme *Lexeme)
@@ -855,9 +863,36 @@ struct temp_buffer
     u8 Length;
 };
 
+string_reference StringReference(temp_buffer Buffer)
+{
+    string_reference Result;
+    Result.Memory = Buffer.Start;
+    Result.Length = Buffer.Length;
+    return Result;
+}
+
 u8 Full(temp_buffer *Buffer)
 {
     return sizeof Buffer->Start <= Buffer->Length;
+}
+
+void Append(temp_buffer *Buffer, const char *String)
+{
+    if (String)
+    {
+        const char *Source = String;
+        while (!Full(Buffer) && *Source)
+        {
+            Buffer->Start[Buffer->Length++] = *Source++;
+        }
+    }
+}
+
+temp_buffer TempBuffer(const char *String = 0)
+{
+    temp_buffer Result;
+    Append(&Result, String);
+    return Result;
 }
 
 void Append(temp_buffer *Buffer, char Char)
@@ -868,9 +903,41 @@ void Append(temp_buffer *Buffer, char Char)
     }
 }
 
-u8 Equals(temp_buffer *Buffer, const char *String)
+u8 Equals(string_reference Buffer, const char *String)
 {
-    return strncmp(Buffer->Start, String, Buffer->Length) == 0 && strlen(String) <= Buffer->Length;
+    u8 Result = 1;
+    s32 BufferCountdown = Buffer.Length;
+    char *BufferAt = Buffer.Memory;
+    const char *StringAt = String;
+    while (Result && BufferCountdown-- && *StringAt)
+    {
+        Result = (*BufferAt++ == *StringAt++);
+    }
+    Result = Result && (BufferCountdown < 0 && *StringAt == 0);
+    return Result;
+}
+
+s32 Equals(buffer Buffer, const char *String)
+{
+    return Equals(StringReference(Buffer), String);
+}
+
+u8 Equals(temp_buffer Buffer, const char *String)
+{
+    return Equals(StringReference(Buffer), String);
+}
+
+u8 Equals(const char *A, const char *B)
+{
+    u8 Result = 1;
+    const char *AAt= A;
+    const char *BAt = B;
+    while (Result && *A && *B)
+    {
+        Result = (*A++ == *B++);
+    }
+    Result = Result && (*A == *B);
+    return Result;
 }
 
 lexeme *LexString(parser *Parser)
@@ -899,7 +966,7 @@ lexeme *LexString(parser *Parser)
     return Lexeme;
 }
 
-lexeme *LexCommand(parser *Parser, temp_buffer *Buffer, token_type Type, const char *Name)
+lexeme *LexCommand(parser *Parser, temp_buffer Buffer, token_type Type, const char *Name)
 {
     lexeme *Lexeme = 0;
     if (Equals(Buffer, Name))
@@ -913,13 +980,12 @@ lexeme *LexCommand(parser *Parser, temp_buffer *Buffer, token_type Type, const c
 
 lexeme *LexAlpha(parser *Parser)
 {
-    temp_buffer Buffer_;
-    temp_buffer *Buffer = &Buffer_;
+    temp_buffer Buffer;
     char Char = PeekChar(Parser);
     
     while (isalpha(Char) || isdigit(Char) || Char == '_')
     {
-        Append(Buffer, GetChar(Parser));
+        Append(&Buffer, GetChar(Parser));
         Char = PeekChar(Parser);
     }
     lexeme *Lexeme = 0;
@@ -959,9 +1025,9 @@ lexeme *LexAlpha(parser *Parser)
     {
         Lexeme = PushLexeme(Parser, token_type_ID);
         Lexeme->String.Memory = (char*)Parser->StringArena.Memory + Parser->StringArena.Allocated;
-        for (s32 i = 0; i < Buffer->Length; ++i)
+        for (s32 i = 0; i < Buffer.Length; ++i)
         {
-            Lexeme->String.Length += StringAppend(Parser, Buffer->Start[i]);
+            Lexeme->String.Length += StringAppend(Parser, Buffer.Start[i]);
         }
         if (PeekChar(Parser) == '$')
         {
@@ -2279,7 +2345,7 @@ s32 StringInput(environment *Environment, lexeme *Id, r32 AllowedSeconds = -1, l
                 ElapsedMilliseconds = GetTimeMilliseconds() - StartTimeMilliseconds;
                 TimedInput.TimeoutMilliseconds = Max(MinTimeoutMilliseconds, AllowedMilliseconds - ElapsedMilliseconds);
             }
-            if (Char != '\n' && !Full(&Buffer))
+            if (Char != '\n' && !Full(Buffer))
             {
                 *Buffer.At++ = Char;
             }
@@ -2482,8 +2548,14 @@ void EvaluateLetAssignment(environment *Environment, lexeme *Id, lexeme *Value)
         lexeme String;
         temporary_memory TemporaryMemory = BeginTemporaryMemory(&Environment->Parser.StringArena);
         ToString(Environment, Value, &String);
-        Variable->String.Length = Min(Variable->Integer, String.String.Length);
-        strncpy(Variable->String.Memory, String.String.Memory, Variable->String.Length);
+        Variable->String.Length = 0;
+        s32 BufferCountdown = Variable->String.Length = Min(Variable->Integer, String.String.Length);
+        char *Source = String.String.Memory;
+        char *Dest = Variable->String.Memory;
+        while (BufferCountdown--)
+        {
+            *Dest++ = *Source++;
+        }
         EndTemporaryMemory(&Environment->Parser.StringArena, TemporaryMemory);
     }
     else
@@ -2689,46 +2761,238 @@ int ExpressionTest(environment *Environment, string_reference ExpressionString, 
     return Result;
 }
 
+int ExpectEquals(string_reference A, const char *B)
+{
+    u8 Success = Equals(A, B);
+    if (Success)
+    {
+#if PRINT_SUCCESSFUL_TESTS
+        printf("Expecting: STRING_REFERENCE(\"%.*s\") = \"%s\" . . . ", A.Length, A.Memory, B);
+        printf("\033[32mPASS\033[0m\n");
+#endif
+    }
+    else
+    {
+        printf("Expecting: STRING_REFERENCE(\"%.*s\") = \"%s\" . . . ", A.Length, A.Memory, B);
+        printf("\033[31mFAIL\033[0m\n");
+    }
+    return !Success;
+}
+
+int ExpectNotEquals(string_reference A, const char *B)
+{
+    u8 Success = !Equals(A, B);
+    if (Success)
+    {
+#if PRINT_SUCCESSFUL_TESTS
+        printf("Expecting: STRING_REFERENCE(\"%.*s\") != \"%s\" . . . ", A.Length, A.Memory, B);
+        printf("\033[32mPASS\033[0m\n");
+#endif
+    }
+    else
+    {
+        printf("Expecting: STRING_REFERENCE(\"%.*s\") != \"%s\" . . . ", A.Length, A.Memory, B);
+        printf("\033[31mFAIL\033[0m\n");
+    }
+    return !Success;
+}
+
+int ExpectEquals(buffer A, const char *B)
+{
+    u8 Success = Equals(A, B);
+    if (Success)
+    {
+#if PRINT_SUCCESSFUL_TESTS
+        printf("Expecting: BUFFER(\"%.*s\") = \"%s\" . . . ", (int)(A.At - A.Contents), A.Contents, B);
+        printf("\033[32mPASS\033[0m\n");
+#endif
+    }
+    else
+    {
+        printf("Expecting: BUFFER(\"%.*s\") = \"%s\" . . . ", (int)(A.At - A.Contents), A.Contents, B);
+        printf("\033[31mFAIL\033[0m\n");
+    }
+    return !Success;
+}
+
+int ExpectNotEquals(buffer A, const char *B)
+{
+    u8 Success = !Equals(A, B);
+    if (Success)
+    {
+#if PRINT_SUCCESSFUL_TESTS
+        printf("Expecting: BUFFER(\"%.*s\") != \"%s\" . . . ", (int)(A.At - A.Contents), A.Contents, B);
+        printf("\033[32mPASS\033[0m\n");
+#endif
+    }
+    else
+    {
+        printf("Expecting: BUFFER(\"%.*s\") != \"%s\" . . . ", (int)(A.At - A.Contents), A.Contents, B);
+        printf("\033[31mFAIL\033[0m\n");
+    }
+    return !Success;
+}
+
+int ExpectEquals(string_reference A, string_reference B)
+{
+    u8 Success = Equals(A, B);
+    if (Success)
+    {
+#if PRINT_SUCCESSFUL_TESTS
+        printf("Expecting: STRING_REFERENCE(\"%.*s\") = STRING_REFERENCE(\"%.*s\") . . . ", A.Length, A.Memory, B.Length, B.Memory);
+        printf("\033[32mPASS\033[0m\n");
+#endif
+    }
+    else
+    {
+        printf("Expecting: STRING_REFERENCE(\"%.*s\") = STRING_REFERENCE(\"%.*s\") . . . ", A.Length, A.Memory, B.Length, B.Memory);
+        printf("\033[31mFAIL\033[0m\n");
+    }
+    return !Success;
+}
+
+int ExpectNotEquals(string_reference A, string_reference B)
+{
+    u8 Success = !Equals(A, B);
+    if (Success)
+    {
+#if PRINT_SUCCESSFUL_TESTS
+        printf("Expecting: STRING_REFERENCE(\"%.*s\") != STRING_REFERENCE(\"%.*s\") . . . ", A.Length, A.Memory, B.Length, B.Memory);
+        printf("\033[32mPASS\033[0m\n");
+#endif
+    }
+    else
+    {
+        printf("Expecting: STRING_REFERENCE(\"%.*s\") != STRING_REFERENCE(\"%.*s\") . . . ", A.Length, A.Memory, B.Length, B.Memory);
+        printf("\033[31mFAIL\033[0m\n");
+    }
+    return !Success;
+}
+
+int ExpectEquals(temp_buffer A, const char *B)
+{
+    u8 Success = Equals(A, B);
+    if (Success)
+    {
+#if PRINT_SUCCESSFUL_TESTS
+        printf("Expecting: TempBuffer(\"%.*s\") = \"%s\" . . . ", A.Length, A.Start, B);
+        printf("\033[32mPASS\033[0m\n");
+#endif
+    }
+    else
+    {
+        printf("Expecting: TempBuffer(\"%.*s\") = \"%s\" . . . ", A.Length, A.Start, B);
+        printf("\033[31mFAIL\033[0m\n");
+    }
+    return !Success;
+}
+
+int ExpectNotEquals(temp_buffer A, const char *B)
+{
+    u8 Success = !Equals(A, B);
+    if (Success)
+    {
+#if PRINT_SUCCESSFUL_TESTS
+        printf("Expecting: TempBuffer(\"%.*s\") != \"%s\" . . . ", A.Length, A.Start, B);
+        printf("\033[32mPASS\033[0m\n");
+#endif
+    }
+    else
+    {
+        printf("Expecting: TempBuffer(\"%.*s\") != \"%s\" . . . ", A.Length, A.Start, B);
+        printf("\033[31mFAIL\033[0m\n");
+    }
+    return !Success;
+}
+
+int ExpectEquals(const char *A, const char *B)
+{
+    u8 Success = Equals(A, B);
+    if (Success)
+    {
+#if PRINT_SUCCESSFUL_TESTS
+        printf("Expecting: \"%s\" = \"%s\" . . . ", A, B);
+        printf("\033[32mPASS\033[0m\n");
+#endif
+    }
+    else
+    {
+        printf("Expecting: \"%s\" = \"%s\" . . . ", A, B);
+        printf("\033[31mFAIL\033[0m\n");
+    }
+    return !Success;
+}
+
+int ExpectNotEquals(const char *A, const char *B)
+{
+    u8 Success = !Equals(A, B);
+    if (Success)
+    {
+#if PRINT_SUCCESSFUL_TESTS
+        printf("Expecting: \"%s\" != \"%s\" . . . ", A, B);
+        printf("\033[32mPASS\033[0m\n");
+#endif
+    }
+    else
+    {
+        printf("Expecting: \"%s\" != \"%s\" . . . ", A, B);
+        printf("\033[31mFAIL\033[0m\n");
+    }
+    return !Success;
+}
+
 #define EXPRESSION_TEST(Environment, ExpressionString, ExpectedString, ExpectedValue) ExpressionTest(Environment, STRING_REFERENCE(ExpressionString), STRING_REFERENCE(ExpectedString), ExpectedValue)
+#define STRING_TEST(T, A, B) T(A, B) + T(STRING_REFERENCE(A), B) + T(STRING_REFERENCE(A), STRING_REFERENCE(B)) + T(TempBuffer(A), B) + T(BUFFER(A), B)
 
 int Test(environment *Environment)
 {
-    int Result = 0;
-    Result += EXPRESSION_TEST(Environment, "0", "0", 0);
-    Result += EXPRESSION_TEST(Environment, "1", "1", 1);
-    Result += EXPRESSION_TEST(Environment, "NOT 1", "(NOT 1)", !1);
-    Result += EXPRESSION_TEST(Environment, "NOT 0", "(NOT 0)", !0);
-    Result += EXPRESSION_TEST(Environment, "NOT -1", "(NOT (-1))", !-1);
-    Result += EXPRESSION_TEST(Environment, "0 OR 0", "(0 OR 0)", 0 || 0);
-    Result += EXPRESSION_TEST(Environment, "0 OR 1", "(0 OR 1)", 0 || 1);
-    Result += EXPRESSION_TEST(Environment, "1 OR 0", "(1 OR 0)", 1 || 0);
-    Result += EXPRESSION_TEST(Environment, "1 OR 1", "(1 OR 1)", 1 || 1);
-    Result += EXPRESSION_TEST(Environment, "0 AND 0", "(0 AND 0)", 0 && 0);
-    Result += EXPRESSION_TEST(Environment, "0 AND 1", "(0 AND 1)", 0 && 1);
-    Result += EXPRESSION_TEST(Environment, "1 AND 0", "(1 AND 0)", 1 && 0);
-    Result += EXPRESSION_TEST(Environment, "1 AND 1", "(1 AND 1)", 1 && 1);
-    Result += EXPRESSION_TEST(Environment, "1 AND 1 OR 1", "((1 AND 1) OR 1)", 1 && 1 || 1);
-    Result += EXPRESSION_TEST(Environment, "1 OR 1 AND 1", "(1 OR (1 AND 1))", 1 || 1 && 1);
-    Result += EXPRESSION_TEST(Environment, "32+2/3*18", "(32+((2/3)*18))", 32+2.0f/3.0f*18);
-    Result += EXPRESSION_TEST(Environment, "1+2*3+4", "((1+(2*3))+4)", 1+2*3+4);
-    Result += EXPRESSION_TEST(Environment, "1*2+3*4", "((1*2)+(3*4))", 1*2+3*4);
-    Result += EXPRESSION_TEST(Environment, "1*2=3*4", "((1*2)=(3*4))", 1*2==3*4);
-    Result += EXPRESSION_TEST(Environment, "4^3^2", "(4^(3^2))", pow(4, pow(3, 2)));
-    Result += EXPRESSION_TEST(Environment, "2-1", "(2-1)", 2-1);
-    Result += EXPRESSION_TEST(Environment, "1-2", "(1-2)", 1-2);
-    Result += EXPRESSION_TEST(Environment, "-1", "(-1)", -1);
-    Result += EXPRESSION_TEST(Environment, "--1", "(-(-1))", -(-1));
-    Result += EXPRESSION_TEST(Environment, "-3^2", "(-(3^2))", -pow(3, 2));
-    Result += EXPRESSION_TEST(Environment, "1+2*3", "(1+(2*3))", 1+2*3);
-    Result += EXPRESSION_TEST(Environment, "(1+2)*3", "((1+2)*3)", (1+2)*3);
-    Result += EXPRESSION_TEST(Environment, "0.5*10", "(0.5*10)", 0.5*10);
-    Result += EXPRESSION_TEST(Environment, "(20/100-4)^2+72", "((((20/100)-4)^2)+72)", pow(20.0f/100-4,2)+72);
-    Result += EXPRESSION_TEST(Environment, "(20/100-4)^2+12", "((((20/100)-4)^2)+12)", pow(20.0f/100-4,2)+12);
-    Result += EXPRESSION_TEST(Environment, "((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1)", (pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
-    Result += EXPRESSION_TEST(Environment, "0.5*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.5*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.5*10>(pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
-    Result += EXPRESSION_TEST(Environment, "0.3*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.3*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.3*10>(pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
-    Result += EXPRESSION_TEST(Environment, "0.2*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.2*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.2*10>(pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
-    return Result;
+    int Failures = 0;
+    Failures += STRING_TEST(ExpectEquals, "Foo", "Foo");
+    Failures += STRING_TEST(ExpectNotEquals, "", "Foo");
+    Failures += STRING_TEST(ExpectNotEquals, "Foo", "");
+    Failures += STRING_TEST(ExpectEquals, "", "");
+    Failures += STRING_TEST(ExpectNotEquals, "Foobar", "Foo");
+    Failures += STRING_TEST(ExpectNotEquals, "Foo", "Foobar");
+    Failures += STRING_TEST(ExpectNotEquals, "xx", "x");
+    Failures += STRING_TEST(ExpectNotEquals, "x", "xx");
+    Failures += STRING_TEST(ExpectNotEquals, "x", "");
+    Failures += STRING_TEST(ExpectNotEquals, "", "x");
+    Failures += STRING_TEST(ExpectNotEquals, "x", "y");
+    Failures += EXPRESSION_TEST(Environment, "0", "0", 0);
+    Failures += EXPRESSION_TEST(Environment, "1", "1", 1);
+    Failures += EXPRESSION_TEST(Environment, "NOT 1", "(NOT 1)", !1);
+    Failures += EXPRESSION_TEST(Environment, "NOT 0", "(NOT 0)", !0);
+    Failures += EXPRESSION_TEST(Environment, "NOT -1", "(NOT (-1))", !-1);
+    Failures += EXPRESSION_TEST(Environment, "0 OR 0", "(0 OR 0)", 0 || 0);
+    Failures += EXPRESSION_TEST(Environment, "0 OR 1", "(0 OR 1)", 0 || 1);
+    Failures += EXPRESSION_TEST(Environment, "1 OR 0", "(1 OR 0)", 1 || 0);
+    Failures += EXPRESSION_TEST(Environment, "1 OR 1", "(1 OR 1)", 1 || 1);
+    Failures += EXPRESSION_TEST(Environment, "0 AND 0", "(0 AND 0)", 0 && 0);
+    Failures += EXPRESSION_TEST(Environment, "0 AND 1", "(0 AND 1)", 0 && 1);
+    Failures += EXPRESSION_TEST(Environment, "1 AND 0", "(1 AND 0)", 1 && 0);
+    Failures += EXPRESSION_TEST(Environment, "1 AND 1", "(1 AND 1)", 1 && 1);
+    Failures += EXPRESSION_TEST(Environment, "1 AND 1 OR 1", "((1 AND 1) OR 1)", 1 && 1 || 1);
+    Failures += EXPRESSION_TEST(Environment, "1 OR 1 AND 1", "(1 OR (1 AND 1))", 1 || 1 && 1);
+    Failures += EXPRESSION_TEST(Environment, "32+2/3*18", "(32+((2/3)*18))", 32+2.0f/3.0f*18);
+    Failures += EXPRESSION_TEST(Environment, "1+2*3+4", "((1+(2*3))+4)", 1+2*3+4);
+    Failures += EXPRESSION_TEST(Environment, "1*2+3*4", "((1*2)+(3*4))", 1*2+3*4);
+    Failures += EXPRESSION_TEST(Environment, "1*2=3*4", "((1*2)=(3*4))", 1*2==3*4);
+    Failures += EXPRESSION_TEST(Environment, "4^3^2", "(4^(3^2))", pow(4, pow(3, 2)));
+    Failures += EXPRESSION_TEST(Environment, "2-1", "(2-1)", 2-1);
+    Failures += EXPRESSION_TEST(Environment, "1-2", "(1-2)", 1-2);
+    Failures += EXPRESSION_TEST(Environment, "-1", "(-1)", -1);
+    Failures += EXPRESSION_TEST(Environment, "--1", "(-(-1))", -(-1));
+    Failures += EXPRESSION_TEST(Environment, "-3^2", "(-(3^2))", -pow(3, 2));
+    Failures += EXPRESSION_TEST(Environment, "1+2*3", "(1+(2*3))", 1+2*3);
+    Failures += EXPRESSION_TEST(Environment, "(1+2)*3", "((1+2)*3)", (1+2)*3);
+    Failures += EXPRESSION_TEST(Environment, "0.5*10", "(0.5*10)", 0.5*10);
+    Failures += EXPRESSION_TEST(Environment, "(20/100-4)^2+72", "((((20/100)-4)^2)+72)", pow(20.0f/100-4,2)+72);
+    Failures += EXPRESSION_TEST(Environment, "(20/100-4)^2+12", "((((20/100)-4)^2)+12)", pow(20.0f/100-4,2)+12);
+    Failures += EXPRESSION_TEST(Environment, "((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1)", (pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
+    Failures += EXPRESSION_TEST(Environment, "0.5*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.5*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.5*10>(pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
+    Failures += EXPRESSION_TEST(Environment, "0.3*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.3*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.3*10>(pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
+    Failures += EXPRESSION_TEST(Environment, "0.2*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.2*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.2*10>(pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
+    return Failures;
 }
 
 #pragma pack(push, 1)
@@ -2757,11 +3021,11 @@ int main(int ArgCount, char *Args[])
     Parser->StringArena.Memory = StringMemory;
     Parser->StringArena.Size = sizeof StringMemory;
 #if RUN_TESTS
-    int TestResult = Test(&Environment);
+    int TestFailures = Test(&Environment);
 #if STOP_AFTER_TESTS
-    return TestResult;
+    return TestFailures;
 #endif
-    Assert(!TestResult);
+    Assert(!TestFailures);
 #endif
     Reset(&Environment);
     program Program = {};
@@ -2837,15 +3101,15 @@ int main(int ArgCount, char *Args[])
         do
         {
             char *Option = Args[ArgIndex++];
-            if (!strcmp(Option, "-h") || !strcmp(Option, "--help"))
+            if (Equals(Option, "-h") || Equals(Option, "--help"))
             {
                 PrintUsageAndExit(&Program);
             }
-            else if (!strcmp(Option, "-x"))
+            else if (Equals(Option, "-x"))
             {
                 Program.CreateExecutable = 1;
             }
-            else if (!strcmp(Option, "-o"))
+            else if (Equals(Option, "-o"))
             {
                 char *Value = 0;
                 if (ArgIndex < ArgCount)
