@@ -1,7 +1,5 @@
 BUILD_DIR=~/Projects/build
-PROJECT_DIR=$PWD
 
 clang main.cpp -o $BUILD_DIR/basic
-cd $BUILD_DIR
-./basic -x $PROJECT_DIR/oregon_trail.bas
-./basic -x $PROJECT_DIR/hello_world.bas
+$BUILD_DIR/basic -x oregon_trail.bas -o $BUILD_DIR/oregon_trail
+$BUILD_DIR/basic -x hello_world.bas -o $BUILD_DIR/hello_world

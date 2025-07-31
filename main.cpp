@@ -294,6 +294,16 @@ struct temporary_memory
     size_t AllocatedBefore;
 };
 
+struct program
+{
+    u64 ExeSize;
+    s32 CreateExecutable;
+    char *SourcePath;
+    char *NewExecutablePath;
+    char *ExecutablePath;
+    char *ExecutableName;
+};
+
 void DebugLexer(parser *Parser)
 {
     for (s32 LexIndex = 0; LexIndex < Parser->LexemeCount; ++LexIndex)
@@ -528,6 +538,15 @@ void SkipToEndOfLine(parser *Parser)
     while (!IsEOF(Parser) && GetChar(Parser) != '\n');
 }
 
+void Warn(const char *Format, ...)
+{
+    va_list args;
+    va_start(args, Format);
+
+    vfprintf(stderr, Format, args);
+    fprintf(stderr, "\n");
+}
+
 void Warn(parser *Parser, const char *Format, ...)
 {
     va_list args;
@@ -571,6 +590,19 @@ void Panic(lexeme *Lexeme, const char *Format, ...)
     fprintf(stderr, "\n");
 
     exit(1);
+}
+
+void PrintUsageAndExit(program *Program)
+{
+    Panic("Usage: %s <src>\n"
+          "       %s <src> -x [-o <out>]\n"
+          "       %s [--help]\n"
+          "Execute a BASIC program.\n"
+          "\n"
+          "\t-h, --help  display this help and exit\n"
+          "\t-o <out>    store the executable BASIC program at <out> (used with -x)\n"
+          "\t-x          create an executable version of the given BASIC program <src>\n",
+          Program->ExecutableName, Program->ExecutableName, Program->ExecutableName);
 }
 
 struct buffer
@@ -2749,11 +2781,19 @@ int main(int ArgCount, char *Args[])
     Assert(!TestResult);
 #endif
     Reset(&Environment);
-    u64 ExeSize = 0;
-    FILE *Executable = fopen(Args[0], "rb");
+    program Program = {};
+    Program.ExecutableName = Program.ExecutablePath = Args[0];
+    for (char *At = Program.ExecutablePath; *At; At++)
+    {
+        if (*At == '/')
+        {
+            Program.ExecutableName = ++At;
+        }
+    }
+    FILE *Executable = fopen(Program.ExecutablePath, "rb");
     if (!Executable)
     {
-        Panic("Cannot find executable %s", Args[0]);
+        Panic("Cannot find executable %s", Program.ExecutablePath);
     }
     magic_number MagicNumber;
     magic_number Mach64Bit = {0xfeedfacf};
@@ -2793,7 +2833,7 @@ int main(int ArgCount, char *Args[])
                 printf("Segment Load File Offset: %llu\n", SegmentLoadCommand.FileOffset);
                 printf("Segment Load Size: %llu\n", SegmentLoadCommand.Size);
 #endif
-                ExeSize = Max(ExeSize, SegmentLoadCommand.FileOffset + SegmentLoadCommand.Size);
+                Program.ExeSize = Max(Program.ExeSize, SegmentLoadCommand.FileOffset + SegmentLoadCommand.Size);
                 fseek(Executable, LoadCommandHeader.Size - sizeof LoadCommandHeader - sizeof SegmentLoadCommand, SEEK_CUR);
             }
             else
@@ -2804,53 +2844,108 @@ int main(int ArgCount, char *Args[])
         Assert(SizeOfLoadCommands == Header.Data.SizeOfLoadCommands);
 
 #if DEBUG_MACH_O
-        printf("ExeSize: %llu\n", ExeSize);
+        printf("ExeSize: %llu\n", Program.ExeSize);
 #endif
     }
     else
     {
-        Panic(Parser, "Unsupported executable type %0xd\n", MagicNumber.Integer);
+        Panic("Unsupported executable type %0xd\n", MagicNumber.Integer);
     }
 
     fseek(Executable, 0, SEEK_END);
     u64 ExecutableFileSize = ftell(Executable);
-    if (ExecutableFileSize == ExeSize)
+    if (ExecutableFileSize == Program.ExeSize)
     {
         if (ArgCount < 2)
         {
-            Panic(Parser, "Usage: %s [-x] <source_code_file>", Args[0]);
+            PrintUsageAndExit(&Program);
         }
-        char *FirstArg = Args[1];
-        if (0 == strcmp(FirstArg, "-x"))
+        s32 ArgIndex = 1;
+        do
         {
-            if (ArgCount < 3)
+            char *Option = Args[ArgIndex++];
+            if (!strcmp(Option, "-h") || !strcmp(Option, "--help"))
             {
-                Panic(Parser, "-x option requires a filename parameter");
+                PrintUsageAndExit(&Program);
             }
-            char *SecondArg = Args[2];
-            char NewExecutableName[256];
-            char *Dest = NewExecutableName;
-            char *End = Dest + sizeof NewExecutableName - 1;
-            char *Source = SecondArg;
-            do
+            else if (!strcmp(Option, "-x"))
             {
-                if (*Source == '/')
+                Program.CreateExecutable = 1;
+            }
+            else if (!strcmp(Option, "-o"))
+            {
+                char *Value = 0;
+                if (ArgIndex < ArgCount)
                 {
-                    Source++;
-                    Dest = NewExecutableName;
+                    Value = Args[ArgIndex++];
+                    if (Value[0] == '-')
+                    {
+                        ArgIndex--;
+                        Value = 0;
+                    }
                 }
-                *Dest++ = *Source++;
-            } while (Dest < End && *Source && *Source != '.');
-            *Dest = 0;
-            FILE *SourceCodeFile = fopen(SecondArg, "rb");
-            if (!SourceCodeFile)
-            {
-                Panic("Cannot open source code file %s", SecondArg);
+                if (Value)
+                {
+                    Program.NewExecutablePath = Value;
+                }
+                else
+                {
+                    Warn("-o option requires an <out> value");
+                }
             }
-            FILE *NewExecutable = fopen(NewExecutableName, "wb");
+            else if (Option[0] == '-')
+            {
+                Warn("Ignoring unknown option %s", Option);
+            }
+            else if (!Program.SourcePath)
+            {
+                Program.SourcePath = Option;
+            }
+            else
+            {
+                Warn("Too many positional parameters encountered at %s", Option);
+            }
+        } while (ArgIndex < ArgCount);
+
+        if (!Program.SourcePath)
+        {
+            PrintUsageAndExit(&Program);
+        }
+        FILE *SourceCodeFile = fopen(Program.SourcePath, "rb");
+        if (!SourceCodeFile)
+        {
+            Panic("Cannot open source code file %s", Program.SourcePath);
+        }
+
+        if (Program.CreateExecutable)
+        {
+            char RelativeExecutableName[256];
+            char *NewExecutablePath;
+            if (Program.NewExecutablePath)
+            {
+                NewExecutablePath = Program.NewExecutablePath;
+            }
+            else
+            {
+                NewExecutablePath = RelativeExecutableName;
+                char *Dest = RelativeExecutableName;
+                char *End = Dest + sizeof RelativeExecutableName - 1;
+                char *Source = Program.SourcePath;
+                do
+                {
+                    if (*Source == '/')
+                    {
+                        Source++;
+                        Dest = RelativeExecutableName;
+                    }
+                    *Dest++ = *Source++;
+                } while (Dest < End && *Source && *Source != '.');
+                *Dest = 0;
+            }
+            FILE *NewExecutable = fopen(NewExecutablePath, "wb");
             if (!NewExecutable)
             {
-                Panic("Cannot open file %s for writing", NewExecutableName);
+                Panic("Cannot open file %s for writing", NewExecutablePath);
             }
 
             u8 Buffer[1024*1024];
@@ -2867,36 +2962,33 @@ int main(int ArgCount, char *Args[])
                 fwrite(Buffer, BytesRead, 1, NewExecutable);
             } while (BytesRead);
             fclose(NewExecutable);
-            fclose(SourceCodeFile);
-            chmod(NewExecutableName, 0755);
+            chmod(NewExecutablePath, 0755);
             return 0;
         }
         else
         {
-            FILE *SourceCodeFile = fopen(FirstArg, "rb");
-            if (!SourceCodeFile)
+            if (Program.NewExecutablePath)
             {
-                Panic("Cannot open source code file %s", FirstArg);
+                Warn("-o option is only used with -x");
             }
-
             fseek(SourceCodeFile, 0, SEEK_END);
             Parser->Size = ftell(SourceCodeFile);
             fseek(SourceCodeFile, 0, SEEK_SET);
             Parser->Contents = (u8 *)malloc(Parser->Size);
             fread(Parser->Contents, Parser->Size, 1, SourceCodeFile);
-            fclose(SourceCodeFile);
         }
+        fclose(SourceCodeFile);
     }
-    else if (ExeSize < ExecutableFileSize)
+    else if (Program.ExeSize < ExecutableFileSize)
     {
-        fseek(Executable, ExeSize, SEEK_SET);
-        Parser->Size = ExecutableFileSize - ExeSize;
+        fseek(Executable, Program.ExeSize, SEEK_SET);
+        Parser->Size = ExecutableFileSize - Program.ExeSize;
         Parser->Contents = (u8 *)malloc(Parser->Size);
         fread(Parser->Contents, Parser->Size, 1, Executable);
     }
     else
     {
-        Panic(Parser, "Actual executable file size is less than the size calculated from file format (%llu < %llu)", ExecutableFileSize, ExeSize);
+        Panic("Actual executable file size is less than the size calculated from file format (%llu < %llu)", ExecutableFileSize, Program.ExeSize);
     }
     fclose(Executable);
 
