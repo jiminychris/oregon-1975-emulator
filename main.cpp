@@ -543,6 +543,7 @@ void Warn(const char *Format, ...)
     va_list args;
     va_start(args, Format);
 
+    fprintf(stderr, "WARNING: ");
     vfprintf(stderr, Format, args);
     fprintf(stderr, "\n");
 }
