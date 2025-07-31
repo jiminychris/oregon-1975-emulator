@@ -33,6 +33,7 @@ void *memcpy(void *dest, const void *src, size_t count)
     {
         *Dest++ = *Source++;
     }
+    return dest;
 }
 
 void *memset(void *dest, int ch, size_t count)
@@ -42,6 +43,7 @@ void *memset(void *dest, int ch, size_t count)
     {
         *Dest++ = ch;
     }
+    return dest;
 }
 
 size_t Min(size_t A, size_t B)
