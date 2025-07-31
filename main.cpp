@@ -2217,6 +2217,7 @@ void EvaluatePrint(environment *Environment, lexeme *Print)
     {
         printf("\n");
     }
+    fflush(stdout);
 }
 
 void EvaluateDim(environment *Environment, lexeme *Lexeme)
@@ -2314,6 +2315,7 @@ void EvaluateInput(environment *Environment, lexeme *Lexeme)
     do
     {
         printf("?%s", Again ? "?" : "");
+        fflush(stdout);
         if (Lexeme->IsString)
         {
             Again = !StringInput(Environment, Lexeme);
