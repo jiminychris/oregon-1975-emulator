@@ -21,7 +21,6 @@
 #define DEBUG_EVAL_IF 0
 #define DEBUG_STRING_INPUT 0
 #define DEBUG_TIMED_INPUT 0
-#define DEBUG_MACH_O 0
 
 #define ArrayCount(Array) (sizeof(Array) / sizeof(Array[0]))
 #define Assert(Expr) {if(!(Expr)) int __AssertInt = *((volatile int *)0);}
@@ -296,7 +295,9 @@ struct temporary_memory
 
 struct program
 {
-    u64 ExeSize;
+    u64 DataOffset;
+    u64 FooterOffset;
+    u64 ExecutableFileSize;
     s32 CreateExecutable;
     char *SourcePath;
     char *NewExecutablePath;
@@ -400,6 +401,7 @@ lexeme *Expression(parser *Parser);
 lexeme *EvaluateExpression(environment *Environment, lexeme *Expr, lexeme *Value);
 
 lexeme LexemeEOF = {token_type_EOF};
+lexeme LexemeUnknown = {token_type_UNKNOWN};
 
 lexeme *PeekLex(parser *Parser, u32 Lookahead = 0)
 {
@@ -433,7 +435,7 @@ void UngetLex(parser *Parser)
 
 lexeme *PreviousLexeme(parser *Parser)
 {
-    lexeme *Lexeme = 0;
+    lexeme *Lexeme = &LexemeUnknown;
     if (Parser->LexemeCount)
     {
         Lexeme = Parser->Lexemes + Parser->LexemeCount - 1;
@@ -1469,7 +1471,7 @@ lexeme *Statement(parser *Parser)
     lexeme *Command = 0;
     lexeme *Peek = PeekLex(Parser);
 #if DEBUG_STATEMENT
-    printf("%d %.*s\n", LineNumber->Integer, Peek->String.Length, Peek->String.Memory);fflush(stdout);
+    printf("%d %.*s\n", LineNumber->Integer, Peek->String.Length, Peek->String.Memory);
 #endif
     switch (Peek->Type)
     {
@@ -1542,13 +1544,22 @@ lexeme StatementList(parser *Parser)
 {
     lexeme Result;
     lexeme *PreviousStatement = &Result;
-    while (PeekLex(Parser)->Type != token_type_EOF)
+    lexeme *Peek = PeekLex(Parser);
+    while (Peek->Type != token_type_EOF)
     {
-        lexeme *Command = Statement(Parser);
-        if (Command)
+        if (Peek->Type == token_type_NEWLINE)
         {
-            PreviousStatement = PreviousStatement->Right = Command;
+            Match(Parser, token_type_NEWLINE);
         }
+        else
+        {
+            lexeme *Command = Statement(Parser);
+            if (Command)
+            {
+                PreviousStatement = PreviousStatement->Right = Command;
+            }
+        }
+        Peek = PeekLex(Parser);
     }
     return Result;
 }
@@ -2718,48 +2729,16 @@ int Test(environment *Environment)
 }
 
 #pragma pack(push, 1)
-enum load_command_type
-{
-    load_command_type_SegmentLoad = 0x00000019,
-};
 union magic_number
 {
     u32 Integer;
     char String[4];
 };
-
-struct mach_o_64_bit_header
+struct cbas_footer
 {
     magic_number MagicNumber;
-    struct
-    {
-        u32 CpuType;
-        u32 CpuSubtype;
-        u32 FileType;
-        u32 NumberOfLoadCommands;
-        u32 SizeOfLoadCommands;
-        u32 Flags;
-        u32 Reserved;
-    } Data;
-};
-
-struct load_command_header
-{
-    u32 Type;
-    u32 Size;
-};
-
-struct segment_load_command_64_bit
-{
-    char SegmentName[16];
-    u64 Address;
-    u64 AddressSize;
-    u64 FileOffset;
-    u64 Size;
-    u32 MaximumVirtualMemoryProtections;
-    u32 InitialVirtualMemoryProtections;
-    u32 NumberOfSections;
-    u32 Flag32;
+    u32 Version;
+    u64 DataOffset;
 };
 #pragma pack(pop)
 
@@ -2796,66 +2775,56 @@ int main(int ArgCount, char *Args[])
     {
         Panic("Cannot find executable %s", Program.ExecutablePath);
     }
-    magic_number MagicNumber;
-    magic_number Mach64Bit = {0xfeedfacf};
-    fread(&MagicNumber.String, sizeof MagicNumber.String, 1, Executable);
-    if (Mach64Bit.Integer == MagicNumber.Integer)
-    {
-        mach_o_64_bit_header Header;
-        Header.MagicNumber = MagicNumber;
-        fread(&Header.Data, sizeof Header.Data, 1, Executable);
-#if DEBUG_MACH_O
-        printf("MagicNumber: %u (0x%0x)\n", Header.MagicNumber.Integer, Header.MagicNumber.Integer);
-        printf("CpuType: %u\n", Header.Data.CpuType);
-        printf("CpuSubtype: %u\n", Header.Data.CpuSubtype);
-        printf("FileType: %u\n", Header.Data.FileType);
-        printf("NumberOfLoadCommands: %u\n", Header.Data.NumberOfLoadCommands);
-        printf("SizeOfLoadCommands: %u\n", Header.Data.SizeOfLoadCommands);
-        printf("Flags: %u\n", Header.Data.Flags);
-        printf("Reserved: %u\n", Header.Data.Reserved);
-#endif
-        load_command_header LoadCommandHeader;
-        s32 LoadCommandCounter = Header.Data.NumberOfLoadCommands;
-        u32 SizeOfLoadCommands = 0;
-        while (LoadCommandCounter--)
-        {
-            fread(&LoadCommandHeader, sizeof LoadCommandHeader, 1, Executable);
-            SizeOfLoadCommands += LoadCommandHeader.Size;
-#if DEBUG_MACH_O
-            printf("Command Type: %u (0x%0x)\n", LoadCommandHeader.Type, LoadCommandHeader.Type);
-            printf("Command Size: %u\n", LoadCommandHeader.Size);
-#endif
-            if (LoadCommandHeader.Type == load_command_type_SegmentLoad)
-            {
-                segment_load_command_64_bit SegmentLoadCommand;
-                fread(&SegmentLoadCommand, sizeof SegmentLoadCommand, 1, Executable);
-#if DEBUG_MACH_O
-                printf("Segment Load Segment Name: %s\n", SegmentLoadCommand.SegmentName);
-                printf("Segment Load File Offset: %llu\n", SegmentLoadCommand.FileOffset);
-                printf("Segment Load Size: %llu\n", SegmentLoadCommand.Size);
-#endif
-                Program.ExeSize = Max(Program.ExeSize, SegmentLoadCommand.FileOffset + SegmentLoadCommand.Size);
-                fseek(Executable, LoadCommandHeader.Size - sizeof LoadCommandHeader - sizeof SegmentLoadCommand, SEEK_CUR);
-            }
-            else
-            {
-                fseek(Executable, LoadCommandHeader.Size - sizeof LoadCommandHeader, SEEK_CUR);
-            }
-        }
-        Assert(SizeOfLoadCommands == Header.Data.SizeOfLoadCommands);
 
-#if DEBUG_MACH_O
-        printf("ExeSize: %llu\n", Program.ExeSize);
-#endif
+    fseek(Executable, 0, SEEK_END);
+    Program.ExecutableFileSize = ftell(Executable);
+    cbas_footer CbasFooter;
+    magic_number CbasMagicNumber = {.String = {'C','B','A','S'}};
+    Program.DataOffset = Program.FooterOffset = Program.ExecutableFileSize - sizeof CbasFooter;
+
+    fseek(Executable, Program.FooterOffset, SEEK_SET);
+    if (fread(&CbasFooter, sizeof CbasFooter, 1, Executable) <= 0 ||
+        CbasFooter.MagicNumber.Integer != CbasMagicNumber.Integer)
+    {
+        Warn("Missing CBAS Magic Number. Defaulting to CLI mode.");
+        Program.DataOffset = Program.FooterOffset = Program.ExecutableFileSize;
     }
     else
     {
-        Panic("Unsupported executable type %0xd\n", MagicNumber.Integer);
-    }
+        switch (CbasFooter.Version)
+        {
+            case 0:
+            {
+                // CLI Mode.
+            } break;
 
-    fseek(Executable, 0, SEEK_END);
-    u64 ExecutableFileSize = ftell(Executable);
-    if (ExecutableFileSize == Program.ExeSize)
+            case 1:
+            {
+                if (CbasFooter.DataOffset <= Program.FooterOffset)
+                {
+                    Program.DataOffset = CbasFooter.DataOffset;
+                }
+                else
+                {
+                    Panic("CBAS Data offset is larger than the footer offset.");
+                }
+            } break;
+
+            default:
+            {
+                Panic("Invalid CBAS version %u.", CbasFooter.Version);
+            } break;
+        }
+    }
+    u64 DataSize = Program.FooterOffset - Program.DataOffset;
+    if (CbasFooter.Version)
+    {
+        fseek(Executable, Program.DataOffset, SEEK_SET);
+        Parser->Size = DataSize;
+        Parser->Contents = (u8 *)malloc(Parser->Size);
+        fread(Parser->Contents, Parser->Size, 1, Executable);
+    }
+    else
     {
         if (ArgCount < 2)
         {
@@ -2950,18 +2919,24 @@ int main(int ArgCount, char *Args[])
             }
 
             u8 Buffer[1024*1024];
+            size_t BytesRemaining = Program.DataOffset;
             size_t BytesRead;
             fseek(Executable, 0, SEEK_SET);
             do
             {
                 BytesRead = fread(Buffer, 1, sizeof Buffer, Executable);
-                fwrite(Buffer, BytesRead, 1, NewExecutable);
-            } while (BytesRead);
+                BytesRemaining -= fwrite(Buffer, 1, Min(BytesRead, BytesRemaining), NewExecutable);
+            } while (BytesRemaining);
             do
             {
                 BytesRead = fread(Buffer, 1, sizeof Buffer, SourceCodeFile);
-                fwrite(Buffer, BytesRead, 1, NewExecutable);
+                fwrite(Buffer, 1, BytesRead, NewExecutable);
             } while (BytesRead);
+            CbasFooter.MagicNumber = CbasMagicNumber;
+            CbasFooter.Version = 1;
+            CbasFooter.DataOffset = Program.DataOffset;
+
+            fwrite(&CbasFooter, sizeof CbasFooter, 1, NewExecutable);
             fclose(NewExecutable);
             chmod(NewExecutablePath, 0755);
             return 0;
@@ -2979,17 +2954,6 @@ int main(int ArgCount, char *Args[])
             fread(Parser->Contents, Parser->Size, 1, SourceCodeFile);
         }
         fclose(SourceCodeFile);
-    }
-    else if (Program.ExeSize < ExecutableFileSize)
-    {
-        fseek(Executable, Program.ExeSize, SEEK_SET);
-        Parser->Size = ExecutableFileSize - Program.ExeSize;
-        Parser->Contents = (u8 *)malloc(Parser->Size);
-        fread(Parser->Contents, Parser->Size, 1, Executable);
-    }
-    else
-    {
-        Panic("Actual executable file size is less than the size calculated from file format (%llu < %llu)", ExecutableFileSize, Program.ExeSize);
     }
     fclose(Executable);
 
