@@ -538,6 +538,17 @@ void Warn(parser *Parser, const char *Format, ...)
     fprintf(stderr, "\n");
 }
 
+void Panic(const char *Format, ...)
+{
+    va_list args;
+    va_start(args, Format);
+
+    vfprintf(stderr, Format, args);
+    fprintf(stderr, "\n");
+
+    exit(1);
+}
+
 void Panic(parser *Parser, const char *Format, ...)
 {
     va_list args;
@@ -2740,6 +2751,10 @@ int main(int ArgCount, char *Args[])
     Reset(&Environment);
     u64 ExeSize = 0;
     FILE *Executable = fopen(Args[0], "rb");
+    if (!Executable)
+    {
+        Panic("Cannot find executable %s", Args[0]);
+    }
     magic_number MagicNumber;
     magic_number Mach64Bit = {0xfeedfacf};
     fread(&MagicNumber.String, sizeof MagicNumber.String, 1, Executable);
@@ -2827,8 +2842,16 @@ int main(int ArgCount, char *Args[])
                 *Dest++ = *Source++;
             } while (Dest < End && *Source && *Source != '.');
             *Dest = 0;
-            FILE *NewExecutable = fopen(NewExecutableName, "wb");
             FILE *SourceCodeFile = fopen(SecondArg, "rb");
+            if (!SourceCodeFile)
+            {
+                Panic("Cannot open source code file %s", SecondArg);
+            }
+            FILE *NewExecutable = fopen(NewExecutableName, "wb");
+            if (!NewExecutable)
+            {
+                Panic("Cannot open file %s for writing", NewExecutableName);
+            }
 
             u8 Buffer[1024*1024];
             size_t BytesRead;
@@ -2843,7 +2866,6 @@ int main(int ArgCount, char *Args[])
                 BytesRead = fread(Buffer, 1, sizeof Buffer, SourceCodeFile);
                 fwrite(Buffer, BytesRead, 1, NewExecutable);
             } while (BytesRead);
-            fwrite(&ExeSize, sizeof ExeSize, 1, NewExecutable);
             fclose(NewExecutable);
             fclose(SourceCodeFile);
             chmod(NewExecutableName, 0755);
@@ -2852,6 +2874,10 @@ int main(int ArgCount, char *Args[])
         else
         {
             FILE *SourceCodeFile = fopen(FirstArg, "rb");
+            if (!SourceCodeFile)
+            {
+                Panic("Cannot open source code file %s", FirstArg);
+            }
 
             fseek(SourceCodeFile, 0, SEEK_END);
             Parser->Size = ftell(SourceCodeFile);
@@ -2863,13 +2889,8 @@ int main(int ArgCount, char *Args[])
     }
     else if (ExeSize < ExecutableFileSize)
     {
-        u64 DataFileStart;
-        fseek(Executable, -sizeof DataFileStart, SEEK_END);
-        size_t DataFileEnd = ftell(Executable);
-        fread(&DataFileStart, sizeof DataFileStart, 1, Executable);
-        fseek(Executable, DataFileStart, SEEK_SET);
-
-        Parser->Size = DataFileEnd - DataFileStart;
+        fseek(Executable, ExeSize, SEEK_SET);
+        Parser->Size = ExecutableFileSize - ExeSize;
         Parser->Contents = (u8 *)malloc(Parser->Size);
         fread(Parser->Contents, Parser->Size, 1, Executable);
     }
