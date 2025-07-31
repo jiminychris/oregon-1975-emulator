@@ -25,6 +25,25 @@
 #define ArrayCount(Array) (sizeof(Array) / sizeof(Array[0]))
 #define Assert(Expr) {if(!(Expr)) int __AssertInt = *((volatile int *)0);}
 
+void *memcpy(void *dest, const void *src, size_t count)
+{
+    u8 *Dest = (u8*)dest;
+    u8 *Source = (u8*)src;
+    while (count--)
+    {
+        *Dest++ = *Source++;
+    }
+}
+
+void *memset(void *dest, int ch, size_t count)
+{
+    u8 *Dest = (u8*)dest;
+    while (count--)
+    {
+        *Dest++ = ch;
+    }
+}
+
 size_t Min(size_t A, size_t B)
 {
     return A < B ? A : B;
