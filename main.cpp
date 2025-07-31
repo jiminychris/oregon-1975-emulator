@@ -2746,7 +2746,7 @@ int main(int ArgCount, char *Args[])
 {
     int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
     fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
-    setvbuf(stdout, NULL, _IONBF, 0);
+
     char StringMemory[65536];
     environment Environment;
     Environment.IsInteractive = isatty(STDIN_FILENO);
