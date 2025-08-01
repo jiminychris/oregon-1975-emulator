@@ -13,25 +13,82 @@ string_reference ParseTest(environment *Environment, string_reference Expression
     return Actual;
 }
 
+size_t AppendExpectingHeader(string_builder *Builder, string_reference Expected)
+{
+    size_t Result = 0;
+    Result += Append(Builder, "Expecting: ");
+    Result += Append(Builder, Expected);
+    Result += Append(Builder, '=');
+    return Result;
+}
+
+size_t AppendExpectingFooter(string_builder *Builder)
+{
+    size_t Result = 0;
+    Result += Append(Builder, " . . . ");
+    return Result;
+}
+
+size_t AppendPass(string_builder *Builder)
+{
+    size_t Result = 0;
+    Result += Append(Builder, "\033[32mPASS\033[0m");
+    Result += Newline(Builder);
+    return Result;
+}
+
+size_t AppendFailHeader(string_builder *Builder, string_reference Actual)
+{
+    size_t Result = 0;
+    Result += Append(Builder, "\033[31mFAIL");
+    Result += Newline(Builder);
+    Result += Append(Builder, "Actual:    ");
+    Result += Append(Builder, Actual);
+    Result += Append(Builder, '=');
+    return Result;
+}
+
+size_t AppendFailFooter(string_builder *Builder)
+{
+    size_t Result = 0;
+    Result += Append(Builder, "\033[0m");
+    Result += Newline(Builder);
+    return Result;
+}
+
+#define APPEND_EXPECTING(Builder, Expected, ExpectedValue) {    \
+        AppendExpectingHeader(Builder, Expected);               \
+        Append(Builder, ExpectedValue);                         \
+        AppendExpectingFooter(Builder);                         \
+    }
+
+#define APPEND_FAIL(Builder, Actual, ActualValue) { \
+        AppendFailHeader(Builder, Actual);          \
+        Append(Builder, ActualValue);               \
+        AppendFailFooter(Builder);                  \
+    }
+
 int ExpressionTest(environment *Environment, string_reference ExpressionString, string_reference Expected, s32 ExpectedValue)
 {
-    int Result = 0;
     lexeme Value;
+    string_builder Builder;
+    Reset(&Builder);
     string_reference Actual = ParseTest(Environment, ExpressionString, &Value);
-    if (Equals(Expected, Actual) && (Value.Type == token_type_BOOLEAN || Value.Type == token_type_INTEGER) && Value.Integer == ExpectedValue)
+    int Success = Equals(Expected, Actual) && (Value.Type == token_type_BOOLEAN || Value.Type == token_type_INTEGER) && Value.Integer == ExpectedValue;
+    if (Success)
     {
 #if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: %.*s=%d . . . ", Expected.Length, Expected.Memory, ExpectedValue);
-        printf("\033[32mPASS\033[0m\n");
+        APPEND_EXPECTING(&Builder, Expected, ExpectedValue);
+        AppendPass(&Builder);
 #endif
     }
     else
     {
-        printf("Expecting: %.*s=%d . . . ", Expected.Length, Expected.Memory, ExpectedValue);
-        printf("\033[31mFAIL\nActual:    %.*s=%d\033[0m\n", Actual.Length, Actual.Memory, Value.Integer);
-        Result = 1;
+        APPEND_EXPECTING(&Builder, Expected, ExpectedValue);
+        APPEND_FAIL(&Builder, Actual, Value.Integer);
     }
-    return Result;
+    Print(&Builder);
+    return !Success;
 }
 
 #define EPSILON 0.00001f
@@ -43,233 +100,189 @@ int AboutEqual(r32 A, r32 B)
 
 int ExpressionTest(environment *Environment, string_reference ExpressionString, string_reference Expected, r64 ExpectedValue)
 {
-    int Result = 0;
     lexeme Value;
+    string_builder Builder;
+    Reset(&Builder);
     string_reference Actual = ParseTest(Environment, ExpressionString, &Value);
-    if (Equals(Expected, Actual) && Value.Type == token_type_REAL && AboutEqual(Value.Real, ExpectedValue))
+    int Success = Equals(Expected, Actual) && Value.Type == token_type_REAL && AboutEqual(Value.Real, ExpectedValue);
+    if (Success)
     {
 #if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: %.*s=%g . . . ", Expected.Length, Expected.Memory, ExpectedValue);
-        printf("\033[32mPASS\033[0m\n");
+        APPEND_EXPECTING(&Builder, Expected, ExpectedValue);
+        AppendPass(&Builder);
 #endif
     }
     else
     {
-        printf("Expecting: %.*s=%g . . . ", Expected.Length, Expected.Memory, ExpectedValue);
-        printf("\033[31mFAIL\nActual:    %.*s=%g\033[0m\n", Actual.Length, Actual.Memory, Value.Real);
-        Result = 1;
+        APPEND_EXPECTING(&Builder, Expected, ExpectedValue);
+        APPEND_FAIL(&Builder, Actual, Value.Real);
     }
-    return Result;
+    Print(&Builder);
+    return !Success;
 }
 
 int ExpressionTest(environment *Environment, string_reference ExpressionString, string_reference Expected, char ExpectedValue)
 {
-    int Result = 0;
     lexeme Value;
+    string_builder Builder;
+    Reset(&Builder);
+    string_builder ExpectedValueBuilder;
+    Reset(&ExpectedValueBuilder);
+    RenderString({1, &ExpectedValue}, &ExpectedValueBuilder.Arena);
+    string_reference ExpectedValueString = StringReference(&ExpectedValueBuilder);
+
     string_reference Actual = ParseTest(Environment, ExpressionString, &Value);
-    if (Equals(Expected, Actual) && Value.Type == token_type_CHAR && Value.Character == ExpectedValue)
+    int Success = Equals(Expected, Actual) && Value.Type == token_type_CHAR && Value.Character == ExpectedValue;
+    if (Success)
     {
 #if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: %.*s='%d . . . ", Expected.Length, Expected.Memory, ExpectedValue);
-        printf("\033[32mPASS\033[0m\n");
+        APPEND_EXPECTING(&Builder, Expected, ExpectedValueString);
+        AppendPass(&Builder);
 #endif
     }
     else
     {
-        printf("Expecting: %.*s='%d . . . ", Expected.Length, Expected.Memory, ExpectedValue);
-        printf("\033[31mFAIL\nActual:    %.*s='%d\033[0m\n", Actual.Length, Actual.Memory, Value.Character);
-        Result = 1;
+        APPEND_EXPECTING(&Builder, Expected, ExpectedValue);
+        APPEND_FAIL(&Builder, Actual, Value.Character);
     }
-    return Result;
+    Print(&Builder);
+    return !Success;
 }
 
 int ExpressionTest(environment *Environment, string_reference ExpressionString, string_reference Expected, const char *ExpectedValue)
 {
     string_builder Builder;
     Reset(&Builder);
-    RenderString(StringReference(ExpectedValue), &Builder.Arena);
-    string_reference ExpectedValueString = StringReference(&Builder);
+    string_builder ExpectedValueBuilder;
+    Reset(&ExpectedValueBuilder);
+    RenderString(StringReference(ExpectedValue), &ExpectedValueBuilder.Arena);
+    string_reference ExpectedValueString = StringReference(&ExpectedValueBuilder);
 
-    int Result = 0;
     lexeme Value;
     string_reference Actual = ParseTest(Environment, ExpressionString, &Value);
-    if (Equals(Expected, Actual) && Value.Type == token_type_STRING && Equals(Value.String, ExpectedValue))
+    int Success = Equals(Expected, Actual) && Value.Type == token_type_STRING && Equals(Value.String, ExpectedValue);
+    if (Success)
     {
 #if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: %.*s=%.*s . . . ", Expected.Length, Expected.Memory, ExpectedValueString.Length, ExpectedValueString.Memory);
-        printf("\033[32mPASS\033[0m\n");
+        APPEND_EXPECTING(&Builder, Expected, ExpectedValueString);
+        AppendPass(&Builder);
 #endif
     }
     else
     {
-        printf("Expecting: %.*s=%.*s . . . ", Expected.Length, Expected.Memory, ExpectedValueString.Length, ExpectedValueString.Memory);
-        printf("\033[31mFAIL\nActual:    %.*s=%.*s\033[0m\n", Actual.Length, Actual.Memory, Value.String.Length, Value.String.Memory);
-        Result = 1;
+        APPEND_EXPECTING(&Builder, Expected, ExpectedValue);
+        APPEND_FAIL(&Builder, Actual, Value.String);
     }
+    Print(&Builder);
+    return !Success;
+}
+
+size_t AppendWrappedString(string_builder *Builder, const char *String)
+{
+    size_t Result = 0;
+    Append(Builder, '"');
+    Append(Builder, String);
+    Append(Builder, '"');
     return Result;
 }
 
-int ExpectEquals(string_reference A, const char *B)
+#define APPEND_WRAPPED_STRING(Result, Builder, Type, String) {   \
+    Result += Append(Builder, Type);                            \
+    Result += Append(Builder, "(\"");                             \
+    Result += Append(Builder, String);                                            \
+    Result += Append(Builder, "\")");                                               \
+    }
+size_t AppendWrappedString(string_builder *Builder, string_reference String)
 {
-    u8 Success = Equals(A, B);
-    if (Success)
-    {
-#if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: STRING_REFERENCE(\"%.*s\") = \"%s\" . . . ", A.Length, A.Memory, B);
-        printf("\033[32mPASS\033[0m\n");
-#endif
-    }
-    else
-    {
-        printf("Expecting: STRING_REFERENCE(\"%.*s\") = \"%s\" . . . ", A.Length, A.Memory, B);
-        printf("\033[31mFAIL\033[0m\n");
-    }
-    return !Success;
+    size_t Result = 0;
+    APPEND_WRAPPED_STRING(Result, Builder, "STRING_REFERENCE", String);
+    return Result;
 }
 
-int ExpectNotEquals(string_reference A, const char *B)
+size_t AppendWrappedString(string_builder *Builder, buffer String)
 {
-    u8 Success = !Equals(A, B);
-    if (Success)
-    {
-#if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: STRING_REFERENCE(\"%.*s\") != \"%s\" . . . ", A.Length, A.Memory, B);
-        printf("\033[32mPASS\033[0m\n");
-#endif
-    }
-    else
-    {
-        printf("Expecting: STRING_REFERENCE(\"%.*s\") != \"%s\" . . . ", A.Length, A.Memory, B);
-        printf("\033[31mFAIL\033[0m\n");
-    }
-    return !Success;
+    size_t Result = 0;
+    APPEND_WRAPPED_STRING(Result, Builder, "BUFFER", String);
+    return Result;
 }
 
-int ExpectEquals(buffer A, const char *B)
-{
-    u8 Success = Equals(A, B);
-    if (Success)
-    {
-#if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: BUFFER(\"%.*s\") = \"%s\" . . . ", (int)(A.At - A.Contents), A.Contents, B);
-        printf("\033[32mPASS\033[0m\n");
-#endif
+#define ExpectEquals(Failures, A, B) {                              \
+        string_builder Builder;                                     \
+        Reset(&Builder);                                            \
+        u8 Success = Equals(A, B);                                  \
+        if (Success)                                                \
+        {                                                           \
+            if(PRINT_SUCCESSFUL_TESTS)                              \
+            {                                                       \
+                Append(&Builder, "Expecting: ");                  \
+                AppendWrappedString(&Builder, A);                                \
+                Append(&Builder, " = ");                        \
+                AppendWrappedString(&Builder, B);                                \
+                Append(&Builder, " . . . ");                      \
+                AppendPass(&Builder);                               \
+            }                                                       \
+        }                                                           \
+        else                                                        \
+        {                                                           \
+            Append(&Builder, "Expecting: ");                      \
+            AppendWrappedString(&Builder, A);                                    \
+            Append(&Builder, " = ");                            \
+            AppendWrappedString(&Builder, B);                                    \
+            Append(&Builder, " . . . ");                          \
+            Append(&Builder, "\033[31mFAIL\033[0m");                \
+            Newline(&Builder);                                      \
+        }                                                           \
+        Print(&Builder);                                            \
+        Failures += !Success;                                       \
     }
-    else
-    {
-        printf("Expecting: BUFFER(\"%.*s\") = \"%s\" . . . ", (int)(A.At - A.Contents), A.Contents, B);
-        printf("\033[31mFAIL\033[0m\n");
-    }
-    return !Success;
-}
 
-int ExpectNotEquals(buffer A, const char *B)
-{
-    u8 Success = !Equals(A, B);
-    if (Success)
-    {
-#if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: BUFFER(\"%.*s\") != \"%s\" . . . ", (int)(A.At - A.Contents), A.Contents, B);
-        printf("\033[32mPASS\033[0m\n");
-#endif
+#define ExpectNotEquals(Failures, A, B) {       \
+        string_builder Builder;                 \
+        Reset(&Builder);                        \
+        u8 Success = !Equals(A, B);              \
+        if (Success)                            \
+        {                                           \
+            if(PRINT_SUCCESSFUL_TESTS)                              \
+            {                                                       \
+                Append(&Builder, "Expecting: ");                  \
+                AppendWrappedString(&Builder, A);                                \
+                Append(&Builder, " != ");                        \
+                AppendWrappedString(&Builder, B);                                \
+                Append(&Builder, " . . . ");                      \
+                AppendPass(&Builder);                               \
+            }                                                       \
+        }                                                           \
+        else                                                        \
+        {                                                           \
+            Append(&Builder, "Expecting: ");                      \
+            AppendWrappedString(&Builder, A);                                    \
+            Append(&Builder, " != ");                           \
+            AppendWrappedString(&Builder, B);                                    \
+            Append(&Builder, " . . . ");                          \
+            Append(&Builder, "\033[31mFAIL\033[0m");                \
+            Newline(&Builder);                                      \
+        }                                                           \
+        Print(&Builder);                                            \
+        Failures += !Success;                                       \
     }
-    else
-    {
-        printf("Expecting: BUFFER(\"%.*s\") != \"%s\" . . . ", (int)(A.At - A.Contents), A.Contents, B);
-        printf("\033[31mFAIL\033[0m\n");
-    }
-    return !Success;
-}
-
-int ExpectEquals(string_reference A, string_reference B)
-{
-    u8 Success = Equals(A, B);
-    if (Success)
-    {
-#if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: STRING_REFERENCE(\"%.*s\") = STRING_REFERENCE(\"%.*s\") . . . ", A.Length, A.Memory, B.Length, B.Memory);
-        printf("\033[32mPASS\033[0m\n");
-#endif
-    }
-    else
-    {
-        printf("Expecting: STRING_REFERENCE(\"%.*s\") = STRING_REFERENCE(\"%.*s\") . . . ", A.Length, A.Memory, B.Length, B.Memory);
-        printf("\033[31mFAIL\033[0m\n");
-    }
-    return !Success;
-}
-
-int ExpectNotEquals(string_reference A, string_reference B)
-{
-    u8 Success = !Equals(A, B);
-    if (Success)
-    {
-#if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: STRING_REFERENCE(\"%.*s\") != STRING_REFERENCE(\"%.*s\") . . . ", A.Length, A.Memory, B.Length, B.Memory);
-        printf("\033[32mPASS\033[0m\n");
-#endif
-    }
-    else
-    {
-        printf("Expecting: STRING_REFERENCE(\"%.*s\") != STRING_REFERENCE(\"%.*s\") . . . ", A.Length, A.Memory, B.Length, B.Memory);
-        printf("\033[31mFAIL\033[0m\n");
-    }
-    return !Success;
-}
-
-int ExpectEquals(const char *A, const char *B)
-{
-    u8 Success = Equals(A, B);
-    if (Success)
-    {
-#if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: \"%s\" = \"%s\" . . . ", A, B);
-        printf("\033[32mPASS\033[0m\n");
-#endif
-    }
-    else
-    {
-        printf("Expecting: \"%s\" = \"%s\" . . . ", A, B);
-        printf("\033[31mFAIL\033[0m\n");
-    }
-    return !Success;
-}
-
-int ExpectNotEquals(const char *A, const char *B)
-{
-    u8 Success = !Equals(A, B);
-    if (Success)
-    {
-#if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: \"%s\" != \"%s\" . . . ", A, B);
-        printf("\033[32mPASS\033[0m\n");
-#endif
-    }
-    else
-    {
-        printf("Expecting: \"%s\" != \"%s\" . . . ", A, B);
-        printf("\033[31mFAIL\033[0m\n");
-    }
-    return !Success;
-}
 
 #define EXPRESSION_TEST(Environment, ExpressionString, ExpectedString, ExpectedValue) ExpressionTest(Environment, STRING_REFERENCE(ExpressionString), STRING_REFERENCE(ExpectedString), ExpectedValue)
-#define STRING_TEST(T, A, B) T(A, B) + T(STRING_REFERENCE(A), B) + T(STRING_REFERENCE(A), STRING_REFERENCE(B)) + T(BUFFER(A), B)
+#define STRING_TEST(Failures, T, A, B) T(Failures, A, B); T(Failures, STRING_REFERENCE(A), B); T(Failures, STRING_REFERENCE(A), STRING_REFERENCE(B)); T(Failures, BUFFER(A), B);
 
 int Test(environment *Environment)
 {
     int Failures = 0;
-    Failures += STRING_TEST(ExpectEquals, "Foo", "Foo");
-    Failures += STRING_TEST(ExpectNotEquals, "", "Foo");
-    Failures += STRING_TEST(ExpectNotEquals, "Foo", "");
-    Failures += STRING_TEST(ExpectEquals, "", "");
-    Failures += STRING_TEST(ExpectNotEquals, "Foobar", "Foo");
-    Failures += STRING_TEST(ExpectNotEquals, "Foo", "Foobar");
-    Failures += STRING_TEST(ExpectNotEquals, "xx", "x");
-    Failures += STRING_TEST(ExpectNotEquals, "x", "xx");
-    Failures += STRING_TEST(ExpectNotEquals, "x", "");
-    Failures += STRING_TEST(ExpectNotEquals, "", "x");
-    Failures += STRING_TEST(ExpectNotEquals, "x", "y");
+    STRING_TEST(Failures, ExpectEquals, "Foo", "Foo");
+    STRING_TEST(Failures, ExpectNotEquals, "", "Foo");
+    STRING_TEST(Failures, ExpectNotEquals, "Foo", "");
+    STRING_TEST(Failures, ExpectEquals, "", "");
+    STRING_TEST(Failures, ExpectNotEquals, "Foobar", "Foo");
+    STRING_TEST(Failures, ExpectNotEquals, "Foo", "Foobar");
+    STRING_TEST(Failures, ExpectNotEquals, "xx", "x");
+    STRING_TEST(Failures, ExpectNotEquals, "x", "xx");
+    STRING_TEST(Failures, ExpectNotEquals, "x", "");
+    STRING_TEST(Failures, ExpectNotEquals, "", "x");
+    STRING_TEST(Failures, ExpectNotEquals, "x", "y");
     Failures += EXPRESSION_TEST(Environment, "'1", "'1", (char)1);
     Failures += EXPRESSION_TEST(Environment, "'1\"FOO\"", "'1\"FOO\"", "\x1""FOO");
     Failures += EXPRESSION_TEST(Environment, "\"FOO\"'1", "\"FOO\"'1", "FOO""\x1");

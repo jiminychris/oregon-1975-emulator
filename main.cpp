@@ -13,7 +13,7 @@
 #include "primitives.h"
 
 #define RUN_TESTS 1
-#define PRINT_SUCCESSFUL_TESTS 0
+#define PRINT_SUCCESSFUL_TESTS 1
 #define DEBUG_LEXER 0
 #define DEBUG_STATEMENT 0
 #define DEBUG_EVALUATE_STATEMENT 0
@@ -337,6 +337,14 @@ struct program
     char *ExecutableName;
 };
 
+struct buffer
+{
+    size_t Size;
+    char *Contents;
+    char *At;
+    char *End;
+};
+
 temporary_memory BeginTemporaryMemory(memory_arena *Arena)
 {
     temporary_memory Result;
@@ -364,6 +372,14 @@ size_t AllocateString(memory_arena *Arena, size_t Size, char **Dest)
     Arena->Allocated = AllocatedActual;
     *Dest = (char*)Arena->Memory + AllocatedBefore;
     return AllocatedActual - AllocatedBefore;
+}
+
+string_reference StringReference(buffer Buffer)
+{
+    string_reference Result;
+    Result.Memory = Buffer.Contents;
+    Result.Length = Buffer.At - Buffer.Contents;
+    return Result;
 }
 
 size_t Append(memory_arena *Arena, char Char, u32 Count = 1)
@@ -422,7 +438,19 @@ size_t Append(memory_arena *Arena, string_reference String)
     return Result;
 }
 
+size_t Append(memory_arena *Arena, buffer Buffer)
+{
+    return Append(Arena, StringReference(Buffer));
+}
+
 size_t Append(memory_arena *Arena, r32 Real)
+{
+    char RealString[256];
+    snprintf(RealString, sizeof RealString, "%g", Real);
+    return Append(Arena, RealString);
+}
+
+size_t Append(memory_arena *Arena, r64 Real)
 {
     char RealString[256];
     snprintf(RealString, sizeof RealString, "%g", Real);
@@ -505,6 +533,11 @@ size_t Append(string_builder *Builder, string_reference String)
     return Append(&Builder->Arena, String);
 }
 
+size_t Append(string_builder *Builder, buffer Buffer)
+{
+    return Append(&Builder->Arena, Buffer);
+}
+
 size_t Append(string_builder *Builder, char Char, u32 Count = 1)
 {
     return Append(&Builder->Arena, Char, Count);
@@ -536,6 +569,11 @@ size_t Append(string_builder *Builder, s32 Integer)
 }
 
 size_t Append(string_builder *Builder, r32 Real)
+{
+    return Append(&Builder->Arena, Real);
+}
+
+size_t Append(string_builder *Builder, r64 Real)
 {
     return Append(&Builder->Arena, Real);
 }
@@ -833,14 +871,6 @@ void PrintUsageAndExit(program *Program)
           Program->ExecutableName, Program->ExecutableName, Program->ExecutableName);
 }
 
-struct buffer
-{
-    size_t Size;
-    char *Contents;
-    char *At;
-    char *End;
-};
-
 buffer NewBuffer(char *Contents, size_t Size)
 {
     buffer Result;
@@ -858,14 +888,6 @@ void Reset(buffer *Buffer)
 s32 Full(buffer Buffer)
 {
     return Buffer.End <= Buffer.At;
-}
-
-string_reference StringReference(buffer Buffer)
-{
-    string_reference Result;
-    Result.Memory = Buffer.Contents;
-    Result.Length = Buffer.At - Buffer.Contents;
-    return Result;
 }
 
 s32 Equals(string_reference A, string_reference B)
