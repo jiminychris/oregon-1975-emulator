@@ -266,7 +266,7 @@ size_t AppendWrappedString(string_builder *Builder, buffer String)
         Failures += !Success;                                       \
     }
 
-#define EXPRESSION_TEST(Environment, ExpressionString, ExpectedString, ExpectedValue) ExpressionTest(Environment, STRING_REFERENCE(ExpressionString), STRING_REFERENCE(ExpectedString), ExpectedValue)
+#define EXPRESSION_TEST(Failures, Environment, ExpressionString, ExpectedString, ExpectedValue) Failures += ExpressionTest(Environment, STRING_REFERENCE(ExpressionString), STRING_REFERENCE(ExpectedString), ExpectedValue)
 #define STRING_TEST(Failures, T, A, B) T(Failures, A, B); T(Failures, STRING_REFERENCE(A), B); T(Failures, STRING_REFERENCE(A), STRING_REFERENCE(B)); T(Failures, BUFFER(A), B);
 
 int Test(environment *Environment)
@@ -283,42 +283,42 @@ int Test(environment *Environment)
     STRING_TEST(Failures, ExpectNotEquals, "x", "");
     STRING_TEST(Failures, ExpectNotEquals, "", "x");
     STRING_TEST(Failures, ExpectNotEquals, "x", "y");
-    Failures += EXPRESSION_TEST(Environment, "'1", "'1", (char)1);
-    Failures += EXPRESSION_TEST(Environment, "'1\"FOO\"", "'1\"FOO\"", "\x1""FOO");
-    Failures += EXPRESSION_TEST(Environment, "\"FOO\"'1", "\"FOO\"'1", "FOO""\x1");
-    Failures += EXPRESSION_TEST(Environment, "0", "0", 0);
-    Failures += EXPRESSION_TEST(Environment, "1", "1", 1);
-    Failures += EXPRESSION_TEST(Environment, "NOT 1", "(NOT 1)", !1);
-    Failures += EXPRESSION_TEST(Environment, "NOT 0", "(NOT 0)", !0);
-    Failures += EXPRESSION_TEST(Environment, "NOT -1", "(NOT (-1))", !-1);
-    Failures += EXPRESSION_TEST(Environment, "0 OR 0", "(0 OR 0)", 0 || 0);
-    Failures += EXPRESSION_TEST(Environment, "0 OR 1", "(0 OR 1)", 0 || 1);
-    Failures += EXPRESSION_TEST(Environment, "1 OR 0", "(1 OR 0)", 1 || 0);
-    Failures += EXPRESSION_TEST(Environment, "1 OR 1", "(1 OR 1)", 1 || 1);
-    Failures += EXPRESSION_TEST(Environment, "0 AND 0", "(0 AND 0)", 0 && 0);
-    Failures += EXPRESSION_TEST(Environment, "0 AND 1", "(0 AND 1)", 0 && 1);
-    Failures += EXPRESSION_TEST(Environment, "1 AND 0", "(1 AND 0)", 1 && 0);
-    Failures += EXPRESSION_TEST(Environment, "1 AND 1", "(1 AND 1)", 1 && 1);
-    Failures += EXPRESSION_TEST(Environment, "1 AND 1 OR 1", "((1 AND 1) OR 1)", 1 && 1 || 1);
-    Failures += EXPRESSION_TEST(Environment, "1 OR 1 AND 1", "(1 OR (1 AND 1))", 1 || 1 && 1);
-    Failures += EXPRESSION_TEST(Environment, "32+2/3*18", "(32+((2/3)*18))", 32+2.0f/3.0f*18);
-    Failures += EXPRESSION_TEST(Environment, "1+2*3+4", "((1+(2*3))+4)", 1+2*3+4);
-    Failures += EXPRESSION_TEST(Environment, "1*2+3*4", "((1*2)+(3*4))", 1*2+3*4);
-    Failures += EXPRESSION_TEST(Environment, "1*2=3*4", "((1*2)=(3*4))", 1*2==3*4);
-    Failures += EXPRESSION_TEST(Environment, "4^3^2", "(4^(3^2))", pow(4, pow(3, 2)));
-    Failures += EXPRESSION_TEST(Environment, "2-1", "(2-1)", 2-1);
-    Failures += EXPRESSION_TEST(Environment, "1-2", "(1-2)", 1-2);
-    Failures += EXPRESSION_TEST(Environment, "-1", "(-1)", -1);
-    Failures += EXPRESSION_TEST(Environment, "--1", "(-(-1))", -(-1));
-    Failures += EXPRESSION_TEST(Environment, "-3^2", "(-(3^2))", -pow(3, 2));
-    Failures += EXPRESSION_TEST(Environment, "1+2*3", "(1+(2*3))", 1+2*3);
-    Failures += EXPRESSION_TEST(Environment, "(1+2)*3", "((1+2)*3)", (1+2)*3);
-    Failures += EXPRESSION_TEST(Environment, "0.5*10", "(0.5*10)", 0.5*10);
-    Failures += EXPRESSION_TEST(Environment, "(20/100-4)^2+72", "((((20/100)-4)^2)+72)", pow(20.0f/100-4,2)+72);
-    Failures += EXPRESSION_TEST(Environment, "(20/100-4)^2+12", "((((20/100)-4)^2)+12)", pow(20.0f/100-4,2)+12);
-    Failures += EXPRESSION_TEST(Environment, "((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1)", (pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
-    Failures += EXPRESSION_TEST(Environment, "0.5*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.5*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.5*10>(pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
-    Failures += EXPRESSION_TEST(Environment, "0.3*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.3*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.3*10>(pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
-    Failures += EXPRESSION_TEST(Environment, "0.2*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.2*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.2*10>(pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
+    EXPRESSION_TEST(Failures, Environment, "'1", "'1", (char)1);
+    EXPRESSION_TEST(Failures, Environment, "'1\"FOO\"", "'1\"FOO\"", "\x1""FOO");
+    EXPRESSION_TEST(Failures, Environment, "\"FOO\"'1", "\"FOO\"'1", "FOO""\x1");
+    EXPRESSION_TEST(Failures, Environment, "0", "0", 0);
+    EXPRESSION_TEST(Failures, Environment, "1", "1", 1);
+    EXPRESSION_TEST(Failures, Environment, "NOT 1", "(NOT 1)", !1);
+    EXPRESSION_TEST(Failures, Environment, "NOT 0", "(NOT 0)", !0);
+    EXPRESSION_TEST(Failures, Environment, "NOT -1", "(NOT (-1))", !-1);
+    EXPRESSION_TEST(Failures, Environment, "0 OR 0", "(0 OR 0)", 0 || 0);
+    EXPRESSION_TEST(Failures, Environment, "0 OR 1", "(0 OR 1)", 0 || 1);
+    EXPRESSION_TEST(Failures, Environment, "1 OR 0", "(1 OR 0)", 1 || 0);
+    EXPRESSION_TEST(Failures, Environment, "1 OR 1", "(1 OR 1)", 1 || 1);
+    EXPRESSION_TEST(Failures, Environment, "0 AND 0", "(0 AND 0)", 0 && 0);
+    EXPRESSION_TEST(Failures, Environment, "0 AND 1", "(0 AND 1)", 0 && 1);
+    EXPRESSION_TEST(Failures, Environment, "1 AND 0", "(1 AND 0)", 1 && 0);
+    EXPRESSION_TEST(Failures, Environment, "1 AND 1", "(1 AND 1)", 1 && 1);
+    EXPRESSION_TEST(Failures, Environment, "1 AND 1 OR 1", "((1 AND 1) OR 1)", 1 && 1 || 1);
+    EXPRESSION_TEST(Failures, Environment, "1 OR 1 AND 1", "(1 OR (1 AND 1))", 1 || 1 && 1);
+    EXPRESSION_TEST(Failures, Environment, "32+2/3*18", "(32+((2/3)*18))", 32+2.0f/3.0f*18);
+    EXPRESSION_TEST(Failures, Environment, "1+2*3+4", "((1+(2*3))+4)", 1+2*3+4);
+    EXPRESSION_TEST(Failures, Environment, "1*2+3*4", "((1*2)+(3*4))", 1*2+3*4);
+    EXPRESSION_TEST(Failures, Environment, "1*2=3*4", "((1*2)=(3*4))", 1*2==3*4);
+    EXPRESSION_TEST(Failures, Environment, "4^3^2", "(4^(3^2))", pow(4, pow(3, 2)));
+    EXPRESSION_TEST(Failures, Environment, "2-1", "(2-1)", 2-1);
+    EXPRESSION_TEST(Failures, Environment, "1-2", "(1-2)", 1-2);
+    EXPRESSION_TEST(Failures, Environment, "-1", "(-1)", -1);
+    EXPRESSION_TEST(Failures, Environment, "--1", "(-(-1))", -(-1));
+    EXPRESSION_TEST(Failures, Environment, "-3^2", "(-(3^2))", -pow(3, 2));
+    EXPRESSION_TEST(Failures, Environment, "1+2*3", "(1+(2*3))", 1+2*3);
+    EXPRESSION_TEST(Failures, Environment, "(1+2)*3", "((1+2)*3)", (1+2)*3);
+    EXPRESSION_TEST(Failures, Environment, "0.5*10", "(0.5*10)", 0.5*10);
+    EXPRESSION_TEST(Failures, Environment, "(20/100-4)^2+72", "((((20/100)-4)^2)+72)", pow(20.0f/100-4,2)+72);
+    EXPRESSION_TEST(Failures, Environment, "(20/100-4)^2+12", "((((20/100)-4)^2)+12)", pow(20.0f/100-4,2)+12);
+    EXPRESSION_TEST(Failures, Environment, "((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1)", (pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
+    EXPRESSION_TEST(Failures, Environment, "0.5*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.5*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.5*10>(pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
+    EXPRESSION_TEST(Failures, Environment, "0.3*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.3*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.3*10>(pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
+    EXPRESSION_TEST(Failures, Environment, "0.2*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.2*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.2*10>(pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
     return Failures;
 }
