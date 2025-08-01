@@ -1,3 +1,5 @@
+set -e
+
 BUILD_DIR=~/Projects/build
 
 clang main.cpp -o $BUILD_DIR/basic -fno-rtti -fno-exceptions #-nostdlib

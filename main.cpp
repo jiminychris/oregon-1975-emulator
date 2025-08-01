@@ -14,7 +14,6 @@
 
 #define RUN_TESTS 1
 #define PRINT_SUCCESSFUL_TESTS 0
-#define STOP_AFTER_TESTS 0
 #define DEBUG_LEXER 0
 #define DEBUG_STATEMENT 0
 #define DEBUG_EVALUATE_STATEMENT 0
@@ -44,6 +43,11 @@ void *memset(void *dest, int ch, size_t count)
         *Dest++ = ch;
     }
     return dest;
+}
+
+s32 IsPrintable(char Char)
+{
+    return 32 <= Char && Char <= 126;
 }
 
 size_t Min(size_t A, size_t B)
@@ -138,7 +142,7 @@ precedence_direction PrecedenceDirections[] =
 };
 
 #define CREATE_ENUM(Prefix, Name, Precedence) Prefix##_##Name,
-#define CREATE_STRING(Prefix, Name, Precedence) #Name,
+#define CREATE_STRING(Prefix, Name, Precedence) STRING_REFERENCE(#Name),
 #define CREATE_PRECEDENCE(Prefix, Name, Precedence) operator_precedence_##Precedence,
 
 #define TOKEN_TYPES(x)    \
@@ -202,7 +206,7 @@ enum token_type
     TOKEN_TYPES(CREATE_ENUM)
 };
 
-const char *TokenTypeNames[] =
+const string_reference TokenTypeNames[] =
 {
     TOKEN_TYPES(CREATE_STRING)
 };
@@ -235,7 +239,7 @@ enum basic_command
     BASIC_COMMANDS(CREATE_ENUM)
 };
 
-const char *BasicCommandNames[] =
+const string_reference BasicCommandNames[] =
 {
     BASIC_COMMANDS(CREATE_STRING)
 };
@@ -277,6 +281,12 @@ struct memory_arena
     void *Memory;
     size_t Allocated;
     size_t Size;
+};
+
+struct string_builder
+{
+    memory_arena Arena;
+    char Memory[1024];
 };
 
 struct parser
@@ -327,69 +337,6 @@ struct program
     char *ExecutableName;
 };
 
-void DebugLexer(parser *Parser)
-{
-    for (s32 LexIndex = 0; LexIndex < Parser->LexemeCount; ++LexIndex)
-    {
-        lexeme *Lexeme = Parser->Lexemes + LexIndex;
-        printf("%s ", TokenTypeNames[Lexeme->Type]);
-        switch (Lexeme->Type)
-        {
-            case token_type_REM:
-            {
-                printf("%.*s", Lexeme->String.Length, Lexeme->String.Memory);
-            } break;
-            case token_type_INTEGER:
-            {
-                printf("%d", Lexeme->Integer);
-            } break;
-            case token_type_REAL:
-            {
-                printf("%f", Lexeme->Real);
-            } break;
-            case token_type_CHAR:
-            {
-                printf("%d", Lexeme->Character);
-            } break;
-            case token_type_STRING:
-            {
-                printf("%.*s", Lexeme->String.Length, Lexeme->String.Memory);
-            } break;
-            case token_type_ID:
-            {
-                if (Lexeme->IsString)
-                {
-                    printf("%.*s$", Lexeme->String.Length, Lexeme->String.Memory);
-                }
-                else
-                {
-                    printf("%.*s", Lexeme->String.Length, Lexeme->String.Memory);
-                }
-            } break;
-            case token_type_UNKNOWN:
-            {
-                if (Lexeme->String.Memory)
-                {
-                    printf("%.*s", Lexeme->String.Length, Lexeme->String.Memory);
-                }
-                else
-                {
-                    printf("%c", Lexeme->Character);
-                }
-            } break;
-            default:
-            {
-            } break;
-        }
-        printf("\n");
-    }
-}
-
-u8 IsNumber(token_type Type)
-{
-    return Type == token_type_INTEGER || Type == token_type_REAL;
-}
-
 temporary_memory BeginTemporaryMemory(memory_arena *Arena)
 {
     temporary_memory Result;
@@ -417,6 +364,254 @@ size_t AllocateString(memory_arena *Arena, size_t Size, char **Dest)
     Arena->Allocated = AllocatedActual;
     *Dest = (char*)Arena->Memory + AllocatedBefore;
     return AllocatedActual - AllocatedBefore;
+}
+
+size_t Append(memory_arena *Arena, char Char, u32 Count = 1)
+{
+    size_t Result = 0;
+    if (Count-- && Arena->Allocated < Arena->Size)
+    {
+        Result++;
+        ((char*)Arena->Memory)[Arena->Allocated++] = Char;
+    }
+    return Result;
+}
+
+size_t Append(memory_arena *Arena, signed char Char, u32 Count = 1)
+{
+    return Append(Arena, (char)Char, Count);
+}
+
+size_t Append(memory_arena *Arena, unsigned char Char, u32 Count = 1)
+{
+    return Append(Arena, (char)Char, Count);
+}
+
+size_t Newline(memory_arena *Arena, u32 Count = 1)
+{
+    return Append(Arena, '\n', Count);
+}
+
+size_t Space(memory_arena *Arena, u32 Count = 1)
+{
+    return Append(Arena, ' ', Count);
+}
+
+size_t Append(memory_arena *Arena, const char *String)
+{
+    size_t Result = 0;
+    char *At = (char *)String;
+    while (Arena->Allocated < Arena->Size && *At)
+    {
+        ((char*)Arena->Memory)[Arena->Allocated++] = *At++;
+        Result++;
+    }
+    return Result;
+}
+
+size_t Append(memory_arena *Arena, string_reference String)
+{
+    size_t Result = 0;
+    char *At = String.Memory;
+    s32 Remaining = String.Length;
+    while (Arena->Allocated < Arena->Size && Remaining--)
+    {
+        ((char*)Arena->Memory)[Arena->Allocated++] = *At++;
+        Result++;
+    }
+    return Result;
+}
+
+size_t Append(memory_arena *Arena, r32 Real)
+{
+    char RealString[256];
+    snprintf(RealString, sizeof RealString, "%g", Real);
+    return Append(Arena, RealString);
+}
+
+size_t Append(memory_arena *Arena, s32 Integer)
+{
+    size_t Result = 0;
+    if (Integer == 0)
+    {
+        Result += Append(Arena, '0');
+    }
+    else
+    {
+        if (Integer < 0)
+        {
+            Result += Append(Arena, '-');
+            Integer *= -1;
+        }
+        string_reference Digits = BeginString(Arena);
+        while (Integer)
+        {
+            Digits.Length += Append(Arena, (char)('0' + (Integer % 10)));
+            Integer /= 10;
+        }
+        Result += Digits.Length;
+        char *Head = Digits.Memory;
+        char *Tail = Head + Digits.Length - 1;
+        while (Head < Tail)
+        {
+            char Temp = *Tail;
+            *Tail-- = *Head;
+            *Head++ = Temp;
+        }
+    }
+    return Result;
+}
+
+s32 StringLength(const char *String)
+{
+    s32 Result = 0;
+    while (*String++)
+    {
+        Result += 1;
+    }
+    return Result;
+}
+
+string_reference StringReference(const char *String)
+{
+    string_reference Result;
+    Result.Length = StringLength(String);
+    Result.Memory = (char *)String;
+    return Result;
+}
+
+string_reference StringReference(string_builder *Builder)
+{
+    string_reference Result;
+    Result.Memory = Builder->Memory;
+    Result.Length = Builder->Arena.Allocated;
+    return Result;
+}
+
+void Reset(string_builder *Builder)
+{
+    Builder->Arena.Size = sizeof Builder->Memory;
+    Builder->Arena.Allocated = 0;
+    Builder->Arena.Memory = Builder->Memory;
+}
+
+size_t Append(string_builder *Builder, const char *String)
+{
+    return Append(&Builder->Arena, String);
+}
+
+size_t Append(string_builder *Builder, string_reference String)
+{
+    return Append(&Builder->Arena, String);
+}
+
+size_t Append(string_builder *Builder, char Char, u32 Count = 1)
+{
+    return Append(&Builder->Arena, Char, Count);
+}
+
+size_t Append(string_builder *Builder, unsigned char Char, u32 Count = 1)
+{
+    return Append(&Builder->Arena, (char)Char, Count);
+}
+
+size_t Append(string_builder *Builder, signed char Char, u32 Count = 1)
+{
+    return Append(&Builder->Arena, (char)Char, Count);
+}
+
+size_t Newline(string_builder *Builder, u32 Count = 1)
+{
+    return Newline(&Builder->Arena, Count);
+}
+
+size_t Space(string_builder *Builder, u32 Count = 1)
+{
+    return Space(&Builder->Arena, Count);
+}
+
+size_t Append(string_builder *Builder, s32 Integer)
+{
+    return Append(&Builder->Arena, Integer);
+}
+
+size_t Append(string_builder *Builder, r32 Real)
+{
+    return Append(&Builder->Arena, Real);
+}
+
+ssize_t Print(string_reference String)
+{
+    return write(STDOUT_FILENO, String.Memory, String.Length);
+}
+
+ssize_t Print(string_builder *Builder)
+{
+    return write(STDOUT_FILENO, Builder->Memory, Builder->Arena.Allocated);
+}
+
+void DebugLexer(parser *Parser)
+{
+    string_builder Builder;
+    for (s32 LexIndex = 0; LexIndex < Parser->LexemeCount; ++LexIndex)
+    {
+        Reset(&Builder);
+        lexeme *Lexeme = Parser->Lexemes + LexIndex;
+        Append(&Builder, TokenTypeNames[Lexeme->Type]);
+        Space(&Builder);
+        switch (Lexeme->Type)
+        {
+            case token_type_REM:
+            {
+                Append(&Builder, Lexeme->String);
+            } break;
+            case token_type_INTEGER:
+            {
+                Append(&Builder, Lexeme->Integer);
+            } break;
+            case token_type_REAL:
+            {
+                Append(&Builder, Lexeme->Real);
+            } break;
+            case token_type_CHAR:
+            {
+                Append(&Builder, (s32)Lexeme->Character);
+            } break;
+            case token_type_STRING:
+            {
+                Append(&Builder, Lexeme->String);
+            } break;
+            case token_type_ID:
+            {
+                Append(&Builder, Lexeme->String);
+                if (Lexeme->IsString)
+                {
+                    Append(&Builder, '$');
+                }
+            } break;
+            case token_type_UNKNOWN:
+            {
+                if (Lexeme->String.Memory)
+                {
+                    Append(&Builder, Lexeme->String);
+                }
+                else
+                {
+                    Append(&Builder, Lexeme->Character);
+                }
+            } break;
+            default:
+            {
+            } break;
+        }
+        Newline(&Builder);
+        Print(&Builder);
+    }
+}
+
+u8 IsNumber(token_type Type)
+{
+    return Type == token_type_INTEGER || Type == token_type_REAL;
 }
 
 lexeme *Expression(parser *Parser);
@@ -473,7 +668,7 @@ void UngetChar(parser *Parser)
     }
 }
 
-s8 GetChar(environment *Environment, timed_input *TimedInput = 0)
+signed char GetChar(environment *Environment, timed_input *TimedInput = 0)
 {
     pollfd FileDescriptor;
     FileDescriptor.fd = STDIN_FILENO;
@@ -486,7 +681,7 @@ s8 GetChar(environment *Environment, timed_input *TimedInput = 0)
     }
     TimedInput->TimedOut = 0;
 
-    char Char = getchar();
+    signed char Char = getchar();
     TimedInput->Polled = (Char == EOF);
     if (TimedInput->Polled)
     {
@@ -500,17 +695,24 @@ s8 GetChar(environment *Environment, timed_input *TimedInput = 0)
     else if (!Environment->IsInteractive)
     {
         putchar(Char);
-        fflush(stdout);
     }
 #if DEBUG_TIMED_INPUT
-    printf("Char: %c(%d)\n", Char, Char);
+    string_builder Builder;
+    Reset(&Builder);
+    Append(&Builder, "Char: ");
+    Append(&Builder, Char);
+    Append(&Builder, '(');
+    Append(&Builder, (s32)Char);
+    Append(&Builder, ")");
+    Newline(&Builder);
+    Print(&Builder);
 #endif
     return Char;
 }
 
-s8 GetChar(parser *Parser)
+signed char GetChar(parser *Parser)
 {
-    s8 Result = -1;
+    signed char Result = -1;
     if (Parser->Position < Parser->Size)
     {
         Result = Parser->Contents[Parser->Position++];
@@ -518,9 +720,9 @@ s8 GetChar(parser *Parser)
     return Result;
 }
 
-s8 PeekChar(parser *Parser)
+signed char PeekChar(parser *Parser)
 {
-    s8 Result = -1;
+    signed char Result = -1;
     if (Parser->Position < Parser->Size)
     {
         Result = Parser->Contents[Parser->Position];
@@ -765,163 +967,37 @@ lexeme *LexNumber(parser *Parser)
         Lexeme = PushLexeme(Parser, token_type_INTEGER);
         Lexeme->Integer = Integer;
     }
-    
+
     return Lexeme;
-}
-
-size_t StringAppend(memory_arena *Arena, char Char)
-{
-    size_t Result = 0;
-    if (Arena->Allocated < Arena->Size)
-    {
-        Result = 1;
-        ((char*)Arena->Memory)[Arena->Allocated++] = Char;
-    }
-    return Result;
-}
-
-size_t StringAppend(memory_arena *Arena, char *String)
-{
-    size_t Result = 0;
-    char *At = String;
-    while (Arena->Allocated < Arena->Size && *At)
-    {
-        ((char*)Arena->Memory)[Arena->Allocated++] = *At++;
-        Result++;
-    }
-    return Result;
-}
-
-size_t StringAppend(memory_arena *Arena, string_reference String)
-{
-    size_t Result = 0;
-    char *At = String.Memory;
-    s32 Remaining = String.Length;
-    while (Arena->Allocated < Arena->Size && Remaining--)
-    {
-        ((char*)Arena->Memory)[Arena->Allocated++] = *At++;
-        Result++;
-    }
-    return Result;
-}
-
-s32 StringAppend(parser *Parser, char Char)
-{
-    return StringAppend(&Parser->StringArena, Char);
-}
-
-size_t RealAppend(memory_arena *Arena, r32 Real)
-{
-    char RealString[256];
-    snprintf(RealString, sizeof RealString, "%g", Real);
-    return StringAppend(Arena, RealString);
-}
-
-size_t IntegerAppend(memory_arena *Arena, s32 Integer)
-{
-    size_t Result = 0;
-    if (Integer == 0)
-    {
-        Result += StringAppend(Arena, '0');
-    }
-    else
-    {
-        if (Integer < 0)
-        {
-            Result += StringAppend(Arena, '-');
-            Integer *= -1;
-        }
-        string_reference Digits = BeginString(Arena);
-        while (Integer)
-        {
-            Digits.Length += StringAppend(Arena, '0' + (Integer % 10));
-            Integer /= 10;
-        }
-        Result += Digits.Length;
-        char *Head = Digits.Memory;
-        char *Tail = Head + Digits.Length - 1;
-        while (Head < Tail)
-        {
-            char Temp = *Tail;
-            *Tail-- = *Head;
-            *Head++ = Temp;
-        }
-    }
-    return Result;
 }
 
 lexeme *LexCharacter(parser *Parser)
 {
+    memory_arena *Arena = &Parser->StringArena;
     lexeme *Lexeme = PreviousLexeme(Parser);
-    s32 Integer = 0;
+    char Char = 0;
     while (isdigit(PeekChar(Parser)))
     {
-        Integer = 10 * Integer + GetChar(Parser) - '0';
+        Char = 10 * Char + GetChar(Parser) - '0';
     }
 
     if (Lexeme && Lexeme->Type == token_type_STRING)
     {
-        Lexeme->String.Length += StringAppend(Parser, Integer);
+        Lexeme->String.Length += Append(Arena, Char);
     }
     else if (Lexeme && Lexeme->Type == token_type_CHAR)
     {
         Lexeme->Type = token_type_STRING;
-        Lexeme->String.Memory = (char*)Parser->StringArena.Memory + Parser->StringArena.Allocated;
-        Lexeme->String.Length += StringAppend(Parser, Lexeme->Character);
-        Lexeme->String.Length += StringAppend(Parser, Integer);
+        Lexeme->String = BeginString(Arena);
+        Lexeme->String.Length += Append(Arena, Lexeme->Character);
+        Lexeme->String.Length += Append(Arena, Char);
     }
     else
     {
         Lexeme = PushLexeme(Parser, token_type_CHAR);
-        Lexeme->Character = Integer;
+        Lexeme->Character = Char;
     }
     return Lexeme;
-}
-
-struct temp_buffer
-{
-    char Start[255];
-    u8 Length;
-};
-
-string_reference StringReference(temp_buffer Buffer)
-{
-    string_reference Result;
-    Result.Memory = Buffer.Start;
-    Result.Length = Buffer.Length;
-    return Result;
-}
-
-u8 Full(temp_buffer *Buffer)
-{
-    return sizeof Buffer->Start <= Buffer->Length;
-}
-
-void Append(temp_buffer *Buffer, const char *String)
-{
-    if (String)
-    {
-        const char *Source = String;
-        while (!Full(Buffer) && *Source)
-        {
-            Buffer->Start[Buffer->Length++] = *Source++;
-        }
-    }
-}
-
-temp_buffer TempBuffer(const char *String = 0)
-{
-    temp_buffer Result;
-    Append(&Result, String);
-    return Result;
-}
-
-void Append(temp_buffer *Buffer, char Char)
-{
-    if (!Full(Buffer))
-    {
-        Buffer->Start[Buffer->Length++] = Char;
-    }
 }
 
 u8 Equals(string_reference Buffer, const char *String)
@@ -943,11 +1019,6 @@ s32 Equals(buffer Buffer, const char *String)
     return Equals(StringReference(Buffer), String);
 }
 
-u8 Equals(temp_buffer Buffer, const char *String)
-{
-    return Equals(StringReference(Buffer), String);
-}
-
 u8 Equals(const char *A, const char *B)
 {
     u8 Result = 1;
@@ -963,34 +1034,35 @@ u8 Equals(const char *A, const char *B)
 
 lexeme *LexString(parser *Parser)
 {
+    memory_arena *Arena = &Parser->StringArena;
     lexeme *Lexeme = PreviousLexeme(Parser);
-    if (Lexeme && Lexeme->Type == token_type_STRING)
+    if (Lexeme->Type == token_type_STRING)
     {
     }
-    else if (Lexeme && Lexeme->Type == token_type_CHAR)
+    else if (Lexeme->Type == token_type_CHAR)
     {
         Lexeme->Type = token_type_STRING;
-        Lexeme->String.Memory = (char*)Parser->StringArena.Memory + Parser->StringArena.Allocated;
-        Lexeme->String.Length += StringAppend(Parser, Lexeme->Character);
+        Lexeme->String = BeginString(Arena);
+        Lexeme->String.Length += Append(Arena, Lexeme->Character);
     }
     else
     {
         Lexeme = PushLexeme(Parser, token_type_STRING);
-        Lexeme->String.Memory = (char*)Parser->StringArena.Memory + Parser->StringArena.Allocated;
+        Lexeme->String = BeginString(Arena);
     }
     // TODO: Escaped quotes and separators.
     while (!IsEOF(Parser) && PeekChar(Parser) != '"')
     {
-        Lexeme->String.Length += StringAppend(Parser, GetChar(Parser));
+        Lexeme->String.Length += Append(Arena, GetChar(Parser));
     }
     GetChar(Parser);
     return Lexeme;
 }
 
-lexeme *LexCommand(parser *Parser, temp_buffer Buffer, token_type Type, const char *Name)
+lexeme *LexCommand(parser *Parser, string_reference String, token_type Type, const char *Name)
 {
     lexeme *Lexeme = 0;
-    if (Equals(Buffer, Name))
+    if (Equals(String, Name))
     {
         Lexeme = PushLexeme(Parser, Type);
     }
@@ -1001,58 +1073,61 @@ lexeme *LexCommand(parser *Parser, temp_buffer Buffer, token_type Type, const ch
 
 lexeme *LexAlpha(parser *Parser)
 {
-    temp_buffer Buffer;
-    char Char = PeekChar(Parser);
-    
+    memory_arena *Arena = &Parser->StringArena;
+    string_builder Builder;
+    Reset(&Builder);
+    signed char Char = PeekChar(Parser);
+
     while (isalpha(Char) || isdigit(Char) || Char == '_')
     {
-        Append(&Buffer, GetChar(Parser));
+        Append(&Builder, GetChar(Parser));
         Char = PeekChar(Parser);
     }
+    string_reference String = StringReference(&Builder);
     lexeme *Lexeme = 0;
-    if      ((Lexeme = LEX_COMMAND(Parser, Buffer, REM)))
+    if      ((Lexeme = LEX_COMMAND(Parser, String, REM)))
     {
-        Lexeme->String.Memory = (char*)Parser->StringArena.Memory + Parser->StringArena.Allocated;
+        Lexeme->String = BeginString(Arena);
         while (!IsEOF(Parser) && PeekChar(Parser) != '\n')
         {
-            Lexeme->String.Length += StringAppend(Parser, GetChar(Parser));
+            Lexeme->String.Length += Append(Arena, GetChar(Parser));
         }
     }
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, PRINT))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, LIN))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, TAB))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, INT))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, RND))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, TIM))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, DIM))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, INPUT))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, IF))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, THEN))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, END))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, LET))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, DATA))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, OF))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, OR))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, AND))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, NOT))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, ENTER))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, GOSUB))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, GOTO))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, READ))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, RESTORE))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, RETURN))) {}
-    else if ((Lexeme = LEX_COMMAND(Parser, Buffer, STOP))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, PRINT))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, LIN))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, TAB))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, INT))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, RND))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, TIM))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, DIM))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, INPUT))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, IF))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, THEN))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, END))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, LET))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, DATA))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, OF))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, OR))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, AND))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, NOT))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, ENTER))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, GOSUB))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, GOTO))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, READ))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, RESTORE))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, RETURN))) {}
+    else if ((Lexeme = LEX_COMMAND(Parser, String, STOP))) {}
     else
     {
         Lexeme = PushLexeme(Parser, token_type_ID);
-        Lexeme->String.Memory = (char*)Parser->StringArena.Memory + Parser->StringArena.Allocated;
-        for (s32 i = 0; i < Buffer.Length; ++i)
+        Lexeme->String = BeginString(Arena);
+        for (s32 i = 0; i < String.Length; ++i)
         {
-            Lexeme->String.Length += StringAppend(Parser, Buffer.Start[i]);
+            Lexeme->String.Length += Append(Arena, String.Memory[i]);
         }
         if (PeekChar(Parser) == '$')
         {
-            Lexeme->String.Length += StringAppend(Parser, GetChar(Parser));
+            Lexeme->String.Length += Append(Arena, GetChar(Parser));
             Lexeme->IsString = 1;
         }
     }
@@ -1061,7 +1136,7 @@ lexeme *LexAlpha(parser *Parser)
 
 void Lex(parser *Parser)
 {
-    char Char;
+    signed char Char;
     SkipIntralineWhitespace(Parser);
     while (!IsEOF(Parser))
     {
@@ -1183,6 +1258,9 @@ void Lex(parser *Parser)
         PushLexeme(Parser, token_type_NEWLINE);
     }
     Parser->NaturalLexemeCount = Parser->LexemeCount;
+#if DEBUG_LEXER
+    DebugLexer(Parser);
+#endif
 }
 
 lexeme *Match(parser *Parser, token_type Type)
@@ -1190,7 +1268,7 @@ lexeme *Match(parser *Parser, token_type Type)
     lexeme *Lexeme = GetLex(Parser);
     if (Lexeme->Type != Type)
     {
-        Panic(Lexeme, "Expected %s, not %s", TokenTypeNames[Type], TokenTypeNames[Lexeme->Type]);
+        Panic(Lexeme, "Expected %s, not %s", TokenTypeNames[Type].Memory, TokenTypeNames[Lexeme->Type].Memory);
     }
     return Lexeme;
 }
@@ -1312,6 +1390,7 @@ lexeme *SimpleExpression(parser *Parser, lexeme_stack *OperatorStack)
     }
     switch (Peek->Type)
     {
+        case token_type_CHAR:
         case token_type_STRING:
         case token_type_INTEGER:
         case token_type_REAL:
@@ -1347,7 +1426,7 @@ lexeme *SimpleExpression(parser *Parser, lexeme_stack *OperatorStack)
         } break;
         default:
         {
-            Panic(Peek, "Invalid expression LHS %s\n", TokenTypeNames[Peek->Type]);
+            Panic(Peek, "Invalid expression LHS %s\n", TokenTypeNames[Peek->Type].Memory);
         }
     }
     return Sentinel.Right;
@@ -1670,13 +1749,13 @@ lexeme *EvaluateEquality(environment *Environment, lexeme *LHS, lexeme *RHS, lex
             } break;
             default:
             {
-                Panic(LHS, "Cannot compare values of type %s", TokenTypeNames[LHS->Type]);
+                Panic(LHS, "Cannot compare values of type %s", TokenTypeNames[LHS->Type].Memory);
             } break;
         }
     }
     else
     {
-        Panic(LHS, "Cannot compare values with different types %s and %s", TokenTypeNames[LHS->Type], TokenTypeNames[RHS->Type]);
+        Panic(LHS, "Cannot compare values with different types %s and %s", TokenTypeNames[LHS->Type].Memory, TokenTypeNames[RHS->Type].Memory);
     }
     *Output = Result;
     return Output;
@@ -1694,7 +1773,7 @@ lexeme *NumberOperation(environment *Environment, lexeme *Operator, lexeme *Outp
     EvaluateExpression(Environment, Operator->Right, &RHS);
     if (!IsNumber(LHS.Type) || !IsNumber(RHS.Type))
     {
-        Panic(Operator, "Cannot numerically operate on types %s and %s", TokenTypeNames[LHS.Type], TokenTypeNames[RHS.Type]);
+        Panic(Operator, "Cannot numerically operate on types %s and %s", TokenTypeNames[LHS.Type].Memory, TokenTypeNames[RHS.Type].Memory);
     }
     else if (LHS.Type == token_type_INTEGER && RHS.Type == token_type_INTEGER)
     {
@@ -1725,7 +1804,7 @@ lexeme *NumberOperation(environment *Environment, lexeme *Operator, lexeme *Outp
             } break;
             default:
             {
-                Panic(Operator, "No number operation defined for type %s", TokenTypeNames[Operator->Type]);
+                Panic(Operator, "No number operation defined for type %s", TokenTypeNames[Operator->Type].Memory);
             } break;
         }
     }
@@ -1758,7 +1837,7 @@ lexeme *NumberOperation(environment *Environment, lexeme *Operator, lexeme *Outp
             } break;
             default:
             {
-                Panic(Operator, "No number operation defined for type %s", TokenTypeNames[Operator->Type]);
+                Panic(Operator, "No number operation defined for type %s", TokenTypeNames[Operator->Type].Memory);
             } break;
         }
     }
@@ -1775,7 +1854,7 @@ lexeme *NumberComparison(environment *Environment, lexeme *Operator, lexeme *Out
 
     if (!IsNumber(LHS.Type) || !IsNumber(RHS.Type))
     {
-        Panic(Operator, "Cannot compare types %s and %s", TokenTypeNames[LHS.Type], TokenTypeNames[RHS.Type]);
+        Panic(Operator, "Cannot compare types %s and %s", TokenTypeNames[LHS.Type].Memory, TokenTypeNames[RHS.Type].Memory);
     }
     else if (LHS.Type == token_type_INTEGER && RHS.Type == token_type_INTEGER)
     {
@@ -1799,7 +1878,7 @@ lexeme *NumberComparison(environment *Environment, lexeme *Operator, lexeme *Out
             } break;
             default:
             {
-                Panic(Operator, "No comparison defined for type %s", TokenTypeNames[Operator->Type]);
+                Panic(Operator, "No comparison defined for type %s", TokenTypeNames[Operator->Type].Memory);
             } break;
         }
     }
@@ -1827,7 +1906,7 @@ lexeme *NumberComparison(environment *Environment, lexeme *Operator, lexeme *Out
             } break;
             default:
             {
-                Panic(Operator, "No comparison defined for type %s", TokenTypeNames[Operator->Type]);
+                Panic(Operator, "No comparison defined for type %s", TokenTypeNames[Operator->Type].Memory);
             } break;
         }
     }
@@ -1858,7 +1937,7 @@ lexeme *ToBoolean(environment *Environment, lexeme *Value, lexeme *Output)
 #endif
         default:
         {
-            Panic(Value, "Cannot convert %s to boolean", TokenTypeNames[Value->Type]);
+            Panic(Value, "Cannot convert %s to boolean", TokenTypeNames[Value->Type].Memory);
         } break;
     }
     *Output = Boolean;
@@ -1906,7 +1985,7 @@ lexeme *ToInteger(environment *Environment, lexeme *Value, lexeme *Output, integ
         } break;
         default:
         {
-            Panic(Value, "Cannot convert %s to integer", TokenTypeNames[Value->Type]);
+            Panic(Value, "Cannot convert %s to integer", TokenTypeNames[Value->Type].Memory);
         } break;
     }
     *Output = Integer;
@@ -1928,7 +2007,7 @@ lexeme *EvaluateExpression(environment *Environment, lexeme *Expr, lexeme *Value
             Value->String = BeginString(StringArena);
             while (Value->Integer--)
             {
-                Value->String.Length += StringAppend(StringArena, '\n');
+                Value->String.Length += Append(StringArena, '\n');
             }
         } break;
         case token_type_TAB:
@@ -1939,7 +2018,7 @@ lexeme *EvaluateExpression(environment *Environment, lexeme *Expr, lexeme *Value
             Value->String = BeginString(StringArena);
             while (Value->Integer--)
             {
-                Value->String.Length += StringAppend(StringArena, ' ');
+                Value->String.Length += Append(StringArena, ' ');
             }
         } break;
         case token_type_RND:
@@ -1952,6 +2031,7 @@ lexeme *EvaluateExpression(environment *Environment, lexeme *Expr, lexeme *Value
             EvaluateExpression(Environment, Expr->Left, Value);
             ToInteger(Environment, Value, Value);
         } break;
+        case token_type_CHAR:
         case token_type_STRING:
         case token_type_INTEGER:
         case token_type_REAL:
@@ -2013,13 +2093,13 @@ lexeme *EvaluateExpression(environment *Environment, lexeme *Expr, lexeme *Value
                 } break;
                 default:
                 {
-                    Panic(Expr, "Cannot negate %s", TokenTypeNames[Value->Type]);
+                    Panic(Expr, "Cannot negate %s", TokenTypeNames[Value->Type].Memory);
                 } break;
             }
         } break;
         default:
         {
-            Panic(Expr, "Cannot evaluate %s", TokenTypeNames[Expr->Type]);
+            Panic(Expr, "Cannot evaluate %s", TokenTypeNames[Expr->Type].Memory);
         } break;
     }
     return Value;
@@ -2032,28 +2112,33 @@ lexeme *ToString(memory_arena *Arena, lexeme *Value, lexeme *String)
     Temp.String = BeginString(Arena);
     switch (Value->Type)
     {
+        case token_type_CHAR:
+        {
+            Temp.String.Length = Append(Arena, Value->Character);
+            *String = Temp;
+        } break;
         case token_type_STRING:
         {
             *String = *Value;
         } break;
         case token_type_BOOLEAN:
         {
-            Temp.String.Length = StringAppend(Arena, (char*)(Value->Integer ? "true" : "false"));
+            Temp.String.Length = Append(Arena, (char*)(Value->Integer ? "true" : "false"));
             *String = Temp;
         } break;
         case token_type_REAL:
         {
-            Temp.String.Length = RealAppend(Arena, Value->Real);
+            Temp.String.Length = Append(Arena, Value->Real);
             *String = Temp;
         } break;
         case token_type_INTEGER:
         {
-            Temp.String.Length = IntegerAppend(Arena, Value->Integer);
+            Temp.String.Length = Append(Arena, Value->Integer);
             *String = Temp;
         } break;
         default:
         {
-            Panic(Value, "Cannot convert %s to string", TokenTypeNames[Value->Type]);
+            Panic(Value, "Cannot convert %s to string", TokenTypeNames[Value->Type].Memory);
         } break;
     }
     return String;
@@ -2062,6 +2147,35 @@ lexeme *ToString(memory_arena *Arena, lexeme *Value, lexeme *String)
 lexeme *ToString(environment *Environment, lexeme *Value, lexeme *String)
 {
     return ToString(&Environment->Parser.StringArena, Value, String);
+}
+
+size_t RenderString(string_reference String, memory_arena *Arena)
+{
+    size_t Result = 0;
+    u8 Quoted = 0;
+    s32 BufferCountdown = String.Length;
+    char *At = String.Memory;
+    while (BufferCountdown)
+    {
+        if (IsPrintable(*At))
+        {
+            Result += Append(Arena, '"');
+            do
+            {
+                Result += Append(Arena, *At++);
+            } while (--BufferCountdown && IsPrintable(*At));
+            Result += Append(Arena, '"');
+        }
+        else
+        {
+            do
+            {
+                Result += Append(Arena, '\'');
+                Result += Append(Arena, (s32)*At++);
+            } while (--BufferCountdown && !IsPrintable(*At));
+        }
+    }
+    return Result;
 }
 
 size_t RenderExpression(lexeme *Expr, memory_arena *Arena)
@@ -2111,69 +2225,74 @@ size_t RenderExpression(lexeme *Expr, memory_arena *Arena)
         Parens = LeftBalance;
         while (Parens++)
         {
-            Result += StringAppend(Arena, '(');
+            Result += Append(Arena, '(');
         }
         switch (Expr->Type)
         {
             case token_type_PLUS:
             {
-                Result += StringAppend(Arena, '+');
+                Result += Append(Arena, '+');
             } break;
             case token_type_NEWLINE:
             {
-                Result += StringAppend(Arena, '@');
+                Result += Append(Arena, '@');
             } break;
             case token_type_MINUS:
             case token_type_NEGATE:
             {
-                Result += StringAppend(Arena, '-');
+                Result += Append(Arena, '-');
             } break;
             case token_type_STAR:
             {
-                Result += StringAppend(Arena, '*');
+                Result += Append(Arena, '*');
             } break;
             case token_type_SLASH:
             {
-                Result += StringAppend(Arena, '/');
+                Result += Append(Arena, '/');
             } break;
             case token_type_INTEGER:
             {
-                Result += IntegerAppend(Arena, Expr->Integer);
+                Result += Append(Arena, Expr->Integer);
             } break;
             case token_type_REAL:
             {
-                Result += RealAppend(Arena, Expr->Real);
+                Result += Append(Arena, Expr->Real);
+            } break;
+            case token_type_CHAR:
+            {
+                Result += Append(Arena, '\'');
+                Result += Append(Arena, (s32)Expr->Character);
             } break;
             case token_type_STRING:
             case token_type_ID:
             {
-                Result += StringAppend(Arena, Expr->String);
+                Result += RenderString(Expr->String, Arena);
             } break;
             case token_type_EQ:
             {
-                Result += StringAppend(Arena, '=');
+                Result += Append(Arena, '=');
             } break;
             case token_type_LT:
             {
-                Result += StringAppend(Arena, '<');
+                Result += Append(Arena, '<');
             } break;
             case token_type_LTE:
             {
-                Result += StringAppend(Arena, '<');
-                Result += StringAppend(Arena, '=');
+                Result += Append(Arena, '<');
+                Result += Append(Arena, '=');
             } break;
             case token_type_GTE:
             {
-                Result += StringAppend(Arena, '>');
-                Result += StringAppend(Arena, '=');
+                Result += Append(Arena, '>');
+                Result += Append(Arena, '=');
             } break;
             case token_type_GT:
             {
-                Result += StringAppend(Arena, '>');
+                Result += Append(Arena, '>');
             } break;
             case token_type_CARET:
             {
-                Result += StringAppend(Arena, '^');
+                Result += Append(Arena, '^');
             } break;
             default:
             {
@@ -2181,12 +2300,12 @@ size_t RenderExpression(lexeme *Expr, memory_arena *Arena)
                 s32 IsBinary = IsBinaryOperator(Expr);
                 if (IsBinary)
                 {
-                    Result += StringAppend(Arena, ' ');
+                    Result += Append(Arena, ' ');
                 }
-                Result += StringAppend(Arena, (char*)TokenTypeNames[Expr->Type]);
+                Result += Append(Arena, TokenTypeNames[Expr->Type]);
                 if (IsBinary || IsUnary)
                 {
-                    Result += StringAppend(Arena, ' ');
+                    Result += Append(Arena, ' ');
                 }
             } break;
         }
@@ -2195,7 +2314,7 @@ size_t RenderExpression(lexeme *Expr, memory_arena *Arena)
         {
             while (Parens--)
             {
-                Result += StringAppend(Arena, ')');
+                Result += Append(Arena, ')');
             }
         }
     }
@@ -2277,7 +2396,7 @@ void EvaluatePrint(environment *Environment, lexeme *Print)
             ToString(Environment, &Value, &Value);
             if (Value.Type != token_type_STRING)
             {
-                Panic(&Value, "Cannot print non-string value %s", TokenTypeNames[Value.Type]);
+                Panic(&Value, "Cannot print non-string value %s", TokenTypeNames[Value.Type].Memory);
             }
             if (Prefix)
             {
@@ -2351,8 +2470,15 @@ s32 StringInput(environment *Environment, lexeme *Id, r32 AllowedSeconds = -1, l
     {
         Char = GetChar(Environment, &TimedInput);
 #if DEBUG_TIMED_INPUT
-        printf("TimedOut: %d\n", TimedInput.TimedOut);
-        printf("Polled: %d\n", TimedInput.Polled);
+        string_builder Builder;
+        Reset(&Builder);
+        Append(&Builder, "TimedOut: ");
+        Append(&Builder, TimedInput.TimedOut);
+        Newline(&Builder);
+        Append(&Builder, "Polled: ");
+        Append(&Builder, TimedInput.Polled);
+        Newline(&Builder);
+        Print(&Builder);
 #endif
         if (TimedInput.TimedOut)
         {
@@ -2386,7 +2512,7 @@ s32 StringInput(environment *Environment, lexeme *Id, r32 AllowedSeconds = -1, l
             SecondsElapsed->Real = ElapsedMilliseconds * 0.001f;
         }
     }
-    
+
     Variable->Type = token_type_STRING;
     s32 Length = Buffer.At - Buffer.Contents;
     Variable->String.Length = Length;
@@ -2398,7 +2524,7 @@ s32 StringInput(environment *Environment, lexeme *Id, r32 AllowedSeconds = -1, l
 
 void EvaluateInput(environment *Environment, lexeme *Lexeme)
 {
-    char Char;
+    signed char Char;
     s32 Again = 0;
     do
     {
@@ -2630,7 +2756,7 @@ void Evaluate(environment *Environment, lexeme *Lexeme)
     while (Lexeme && Running)
     {
 #if DEBUG_EVALUATE_STATEMENT
-        printf("%s\n", TokenTypeNames[Lexeme->Type]);
+        printf("%s\n", TokenTypeNames[Lexeme->Type].Memory);
 #endif
         Environment->Goto = 0;
         switch (Lexeme->Type)
@@ -2689,7 +2815,7 @@ void Evaluate(environment *Environment, lexeme *Lexeme)
             } break;
             default:
             {
-                Panic(Lexeme, "Can't evaluate %s", TokenTypeNames[Lexeme->Type]);
+                Panic(Lexeme, "Can't evaluate %s", TokenTypeNames[Lexeme->Type].Memory);
             } break;
         }
         if (Environment->Goto)
@@ -2718,304 +2844,6 @@ void Reset(environment *Environment)
     Environment->DataCount = Environment->DataPosition = 0;
 }
 
-string_reference ParseTest(environment *Environment, string_reference ExpressionString, lexeme *Value)
-{
-    Reset(Environment);
-    parser *Parser = &Environment->Parser;
-    memory_arena *Arena = &Parser->StringArena;
-    Parser->Size = ExpressionString.Length;
-    Parser->Contents = (u8*)ExpressionString.Memory;
-    Lex(Parser);
-    lexeme *Expr = Expression(Parser);
-    EvaluateExpression(Environment, Expr, Value);
-    string_reference Actual = BeginString(Arena);
-    Actual.Length = RenderExpression(Expr, Arena);
-    return Actual;
-}
-
-int ExpressionTest(environment *Environment, string_reference ExpressionString, string_reference Expected, s32 ExpectedValue)
-{
-    int Result = 0;
-    lexeme Value;
-    string_reference Actual = ParseTest(Environment, ExpressionString, &Value);
-    if (Equals(Expected, Actual) && (Value.Type == token_type_BOOLEAN || Value.Type == token_type_INTEGER) && Value.Integer == ExpectedValue)
-    {
-#if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: %.*s=%d . . . ", Expected.Length, Expected.Memory, ExpectedValue);
-        printf("\033[32mPASS\033[0m\n");
-#endif
-    }
-    else
-    {
-        printf("Expecting: %.*s=%d . . . ", Expected.Length, Expected.Memory, ExpectedValue);
-        printf("\033[31mFAIL\nActual:    %.*s=%d\033[0m\n", Actual.Length, Actual.Memory, Value.Integer);
-        Result = 1;
-    }
-    return Result;
-}
-
-#define EPSILON 0.00001f
-
-int AboutEqual(r32 A, r32 B)
-{
-    return fabs(A - B) < EPSILON;
-}
-
-int ExpressionTest(environment *Environment, string_reference ExpressionString, string_reference Expected, r64 ExpectedValue)
-{
-    int Result = 0;
-    lexeme Value;
-    string_reference Actual = ParseTest(Environment, ExpressionString, &Value);
-    if (Equals(Expected, Actual) && Value.Type == token_type_REAL && AboutEqual(Value.Real, ExpectedValue))
-    {
-#if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: %.*s=%g . . . ", Expected.Length, Expected.Memory, ExpectedValue);
-        printf("\033[32mPASS\033[0m\n");
-#endif
-    }
-    else
-    {
-        printf("Expecting: %.*s=%g . . . ", Expected.Length, Expected.Memory, ExpectedValue);
-        printf("\033[31mFAIL\nActual:    %.*s=%g\033[0m\n", Actual.Length, Actual.Memory, Value.Real);
-        Result = 1;
-    }
-    return Result;
-}
-
-int ExpectEquals(string_reference A, const char *B)
-{
-    u8 Success = Equals(A, B);
-    if (Success)
-    {
-#if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: STRING_REFERENCE(\"%.*s\") = \"%s\" . . . ", A.Length, A.Memory, B);
-        printf("\033[32mPASS\033[0m\n");
-#endif
-    }
-    else
-    {
-        printf("Expecting: STRING_REFERENCE(\"%.*s\") = \"%s\" . . . ", A.Length, A.Memory, B);
-        printf("\033[31mFAIL\033[0m\n");
-    }
-    return !Success;
-}
-
-int ExpectNotEquals(string_reference A, const char *B)
-{
-    u8 Success = !Equals(A, B);
-    if (Success)
-    {
-#if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: STRING_REFERENCE(\"%.*s\") != \"%s\" . . . ", A.Length, A.Memory, B);
-        printf("\033[32mPASS\033[0m\n");
-#endif
-    }
-    else
-    {
-        printf("Expecting: STRING_REFERENCE(\"%.*s\") != \"%s\" . . . ", A.Length, A.Memory, B);
-        printf("\033[31mFAIL\033[0m\n");
-    }
-    return !Success;
-}
-
-int ExpectEquals(buffer A, const char *B)
-{
-    u8 Success = Equals(A, B);
-    if (Success)
-    {
-#if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: BUFFER(\"%.*s\") = \"%s\" . . . ", (int)(A.At - A.Contents), A.Contents, B);
-        printf("\033[32mPASS\033[0m\n");
-#endif
-    }
-    else
-    {
-        printf("Expecting: BUFFER(\"%.*s\") = \"%s\" . . . ", (int)(A.At - A.Contents), A.Contents, B);
-        printf("\033[31mFAIL\033[0m\n");
-    }
-    return !Success;
-}
-
-int ExpectNotEquals(buffer A, const char *B)
-{
-    u8 Success = !Equals(A, B);
-    if (Success)
-    {
-#if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: BUFFER(\"%.*s\") != \"%s\" . . . ", (int)(A.At - A.Contents), A.Contents, B);
-        printf("\033[32mPASS\033[0m\n");
-#endif
-    }
-    else
-    {
-        printf("Expecting: BUFFER(\"%.*s\") != \"%s\" . . . ", (int)(A.At - A.Contents), A.Contents, B);
-        printf("\033[31mFAIL\033[0m\n");
-    }
-    return !Success;
-}
-
-int ExpectEquals(string_reference A, string_reference B)
-{
-    u8 Success = Equals(A, B);
-    if (Success)
-    {
-#if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: STRING_REFERENCE(\"%.*s\") = STRING_REFERENCE(\"%.*s\") . . . ", A.Length, A.Memory, B.Length, B.Memory);
-        printf("\033[32mPASS\033[0m\n");
-#endif
-    }
-    else
-    {
-        printf("Expecting: STRING_REFERENCE(\"%.*s\") = STRING_REFERENCE(\"%.*s\") . . . ", A.Length, A.Memory, B.Length, B.Memory);
-        printf("\033[31mFAIL\033[0m\n");
-    }
-    return !Success;
-}
-
-int ExpectNotEquals(string_reference A, string_reference B)
-{
-    u8 Success = !Equals(A, B);
-    if (Success)
-    {
-#if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: STRING_REFERENCE(\"%.*s\") != STRING_REFERENCE(\"%.*s\") . . . ", A.Length, A.Memory, B.Length, B.Memory);
-        printf("\033[32mPASS\033[0m\n");
-#endif
-    }
-    else
-    {
-        printf("Expecting: STRING_REFERENCE(\"%.*s\") != STRING_REFERENCE(\"%.*s\") . . . ", A.Length, A.Memory, B.Length, B.Memory);
-        printf("\033[31mFAIL\033[0m\n");
-    }
-    return !Success;
-}
-
-int ExpectEquals(temp_buffer A, const char *B)
-{
-    u8 Success = Equals(A, B);
-    if (Success)
-    {
-#if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: TempBuffer(\"%.*s\") = \"%s\" . . . ", A.Length, A.Start, B);
-        printf("\033[32mPASS\033[0m\n");
-#endif
-    }
-    else
-    {
-        printf("Expecting: TempBuffer(\"%.*s\") = \"%s\" . . . ", A.Length, A.Start, B);
-        printf("\033[31mFAIL\033[0m\n");
-    }
-    return !Success;
-}
-
-int ExpectNotEquals(temp_buffer A, const char *B)
-{
-    u8 Success = !Equals(A, B);
-    if (Success)
-    {
-#if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: TempBuffer(\"%.*s\") != \"%s\" . . . ", A.Length, A.Start, B);
-        printf("\033[32mPASS\033[0m\n");
-#endif
-    }
-    else
-    {
-        printf("Expecting: TempBuffer(\"%.*s\") != \"%s\" . . . ", A.Length, A.Start, B);
-        printf("\033[31mFAIL\033[0m\n");
-    }
-    return !Success;
-}
-
-int ExpectEquals(const char *A, const char *B)
-{
-    u8 Success = Equals(A, B);
-    if (Success)
-    {
-#if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: \"%s\" = \"%s\" . . . ", A, B);
-        printf("\033[32mPASS\033[0m\n");
-#endif
-    }
-    else
-    {
-        printf("Expecting: \"%s\" = \"%s\" . . . ", A, B);
-        printf("\033[31mFAIL\033[0m\n");
-    }
-    return !Success;
-}
-
-int ExpectNotEquals(const char *A, const char *B)
-{
-    u8 Success = !Equals(A, B);
-    if (Success)
-    {
-#if PRINT_SUCCESSFUL_TESTS
-        printf("Expecting: \"%s\" != \"%s\" . . . ", A, B);
-        printf("\033[32mPASS\033[0m\n");
-#endif
-    }
-    else
-    {
-        printf("Expecting: \"%s\" != \"%s\" . . . ", A, B);
-        printf("\033[31mFAIL\033[0m\n");
-    }
-    return !Success;
-}
-
-#define EXPRESSION_TEST(Environment, ExpressionString, ExpectedString, ExpectedValue) ExpressionTest(Environment, STRING_REFERENCE(ExpressionString), STRING_REFERENCE(ExpectedString), ExpectedValue)
-#define STRING_TEST(T, A, B) T(A, B) + T(STRING_REFERENCE(A), B) + T(STRING_REFERENCE(A), STRING_REFERENCE(B)) + T(TempBuffer(A), B) + T(BUFFER(A), B)
-
-int Test(environment *Environment)
-{
-    int Failures = 0;
-    Failures += STRING_TEST(ExpectEquals, "Foo", "Foo");
-    Failures += STRING_TEST(ExpectNotEquals, "", "Foo");
-    Failures += STRING_TEST(ExpectNotEquals, "Foo", "");
-    Failures += STRING_TEST(ExpectEquals, "", "");
-    Failures += STRING_TEST(ExpectNotEquals, "Foobar", "Foo");
-    Failures += STRING_TEST(ExpectNotEquals, "Foo", "Foobar");
-    Failures += STRING_TEST(ExpectNotEquals, "xx", "x");
-    Failures += STRING_TEST(ExpectNotEquals, "x", "xx");
-    Failures += STRING_TEST(ExpectNotEquals, "x", "");
-    Failures += STRING_TEST(ExpectNotEquals, "", "x");
-    Failures += STRING_TEST(ExpectNotEquals, "x", "y");
-    Failures += EXPRESSION_TEST(Environment, "0", "0", 0);
-    Failures += EXPRESSION_TEST(Environment, "1", "1", 1);
-    Failures += EXPRESSION_TEST(Environment, "NOT 1", "(NOT 1)", !1);
-    Failures += EXPRESSION_TEST(Environment, "NOT 0", "(NOT 0)", !0);
-    Failures += EXPRESSION_TEST(Environment, "NOT -1", "(NOT (-1))", !-1);
-    Failures += EXPRESSION_TEST(Environment, "0 OR 0", "(0 OR 0)", 0 || 0);
-    Failures += EXPRESSION_TEST(Environment, "0 OR 1", "(0 OR 1)", 0 || 1);
-    Failures += EXPRESSION_TEST(Environment, "1 OR 0", "(1 OR 0)", 1 || 0);
-    Failures += EXPRESSION_TEST(Environment, "1 OR 1", "(1 OR 1)", 1 || 1);
-    Failures += EXPRESSION_TEST(Environment, "0 AND 0", "(0 AND 0)", 0 && 0);
-    Failures += EXPRESSION_TEST(Environment, "0 AND 1", "(0 AND 1)", 0 && 1);
-    Failures += EXPRESSION_TEST(Environment, "1 AND 0", "(1 AND 0)", 1 && 0);
-    Failures += EXPRESSION_TEST(Environment, "1 AND 1", "(1 AND 1)", 1 && 1);
-    Failures += EXPRESSION_TEST(Environment, "1 AND 1 OR 1", "((1 AND 1) OR 1)", 1 && 1 || 1);
-    Failures += EXPRESSION_TEST(Environment, "1 OR 1 AND 1", "(1 OR (1 AND 1))", 1 || 1 && 1);
-    Failures += EXPRESSION_TEST(Environment, "32+2/3*18", "(32+((2/3)*18))", 32+2.0f/3.0f*18);
-    Failures += EXPRESSION_TEST(Environment, "1+2*3+4", "((1+(2*3))+4)", 1+2*3+4);
-    Failures += EXPRESSION_TEST(Environment, "1*2+3*4", "((1*2)+(3*4))", 1*2+3*4);
-    Failures += EXPRESSION_TEST(Environment, "1*2=3*4", "((1*2)=(3*4))", 1*2==3*4);
-    Failures += EXPRESSION_TEST(Environment, "4^3^2", "(4^(3^2))", pow(4, pow(3, 2)));
-    Failures += EXPRESSION_TEST(Environment, "2-1", "(2-1)", 2-1);
-    Failures += EXPRESSION_TEST(Environment, "1-2", "(1-2)", 1-2);
-    Failures += EXPRESSION_TEST(Environment, "-1", "(-1)", -1);
-    Failures += EXPRESSION_TEST(Environment, "--1", "(-(-1))", -(-1));
-    Failures += EXPRESSION_TEST(Environment, "-3^2", "(-(3^2))", -pow(3, 2));
-    Failures += EXPRESSION_TEST(Environment, "1+2*3", "(1+(2*3))", 1+2*3);
-    Failures += EXPRESSION_TEST(Environment, "(1+2)*3", "((1+2)*3)", (1+2)*3);
-    Failures += EXPRESSION_TEST(Environment, "0.5*10", "(0.5*10)", 0.5*10);
-    Failures += EXPRESSION_TEST(Environment, "(20/100-4)^2+72", "((((20/100)-4)^2)+72)", pow(20.0f/100-4,2)+72);
-    Failures += EXPRESSION_TEST(Environment, "(20/100-4)^2+12", "((((20/100)-4)^2)+12)", pow(20.0f/100-4,2)+12);
-    Failures += EXPRESSION_TEST(Environment, "((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1)", (pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
-    Failures += EXPRESSION_TEST(Environment, "0.5*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.5*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.5*10>(pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
-    Failures += EXPRESSION_TEST(Environment, "0.3*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.3*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.3*10>(pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
-    Failures += EXPRESSION_TEST(Environment, "0.2*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.2*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.2*10>(pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
-    return Failures;
-}
-
 #pragma pack(push, 1)
 union magic_number
 {
@@ -3030,6 +2858,10 @@ struct cbas_footer
 };
 #pragma pack(pop)
 
+#if RUN_TESTS
+#include "test.cpp"
+#endif
+
 int main(int ArgCount, char *Args[])
 {
     int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
@@ -3043,9 +2875,6 @@ int main(int ArgCount, char *Args[])
     Parser->StringArena.Size = sizeof StringMemory;
 #if RUN_TESTS
     int TestFailures = Test(&Environment);
-#if STOP_AFTER_TESTS
-    return TestFailures;
-#endif
     Assert(!TestFailures);
 #endif
     Reset(&Environment);
@@ -3246,9 +3075,6 @@ int main(int ArgCount, char *Args[])
     fclose(Executable);
 
     Lex(Parser);
-#if DEBUG_LEXER
-    DebugLexer(Parser);
-#endif
     lexeme EntryPoint = StatementList(Parser);
     Evaluate(&Environment, EntryPoint.Right);
     return 0;
