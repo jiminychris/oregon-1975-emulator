@@ -3,14 +3,10 @@
 #include <stdio.h>
 #include <ctype.h>
 #include <stdarg.h>
-#include <string.h>
 #include <math.h>
 #include <time.h>
-#include <unistd.h>
 #include <poll.h>
 #include <sys/stat.h>
-
-#include "primitives.h"
 
 #define RUN_TESTS 1
 #define PRINT_SUCCESSFUL_TESTS 1
@@ -23,27 +19,6 @@
 
 #define ArrayCount(Array) (sizeof(Array) / sizeof(Array[0]))
 #define Assert(Expr) {if(!(Expr)) int __AssertInt = *((volatile int *)0);}
-
-void *memcpy(void *dest, const void *src, size_t count)
-{
-    u8 *Dest = (u8*)dest;
-    u8 *Source = (u8*)src;
-    while (count--)
-    {
-        *Dest++ = *Source++;
-    }
-    return dest;
-}
-
-void *memset(void *dest, int ch, size_t count)
-{
-    u8 *Dest = (u8*)dest;
-    while (count--)
-    {
-        *Dest++ = ch;
-    }
-    return dest;
-}
 
 s32 IsPrintable(char Char)
 {

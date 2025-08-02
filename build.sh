@@ -2,7 +2,7 @@ set -e
 
 BUILD_DIR=~/Projects/build
 
-clang main.cpp -o $BUILD_DIR/basic -fno-rtti -fno-exceptions #-nostdlib
+clang basic_apple_silicon.cpp -o $BUILD_DIR/basic -fno-rtti -fno-exceptions #-nostdlib
 printf "CBAS\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00" >> $BUILD_DIR/basic
 $BUILD_DIR/basic -x oregon_trail.bas -o $BUILD_DIR/oregon_trail
 $BUILD_DIR/basic -x hello_world.bas -o $BUILD_DIR/hello_world
