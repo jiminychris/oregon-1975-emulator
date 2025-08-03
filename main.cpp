@@ -18,6 +18,10 @@
 #define ArrayCount(Array) (sizeof(Array) / sizeof(Array[0]))
 #define Assert(Expr) {if(!(Expr)) int __AssertInt = *((volatile int *)0);}
 
+struct print_buffer;
+ssize_t Print(print_buffer *Buffer);
+print_buffer *Newline(print_buffer *Buffer, u32 Count = 1);
+
 s32 IsPrintable(char Char)
 {
     return 32 <= Char && Char <= 126;
@@ -256,11 +260,71 @@ struct memory_arena
     size_t Size;
 };
 
-struct string_builder
+typedef memory_arena string_builder;
+
+#define STRING_BUILDER(Name, _Size)           \
+    char __##Name[_Size];                     \
+    string_builder Name;                     \
+    Name.Memory = __##Name;               \
+    Name.Allocated = 0;                   \
+    Name.Size = _Size
+
+enum print_buffer_flags
 {
-    memory_arena Arena;
-    char Memory[1024];
+    print_buffer_flags_Exit          = 1 << 0,
+    print_buffer_flags_AppendNewline = 1 << 1,
 };
+
+struct print_buffer
+{
+    int FileDescriptor;
+    string_builder Builder;
+    s32 Flags;
+
+    ~print_buffer()
+    {
+        if (FlagIsSet(Flags, print_buffer_flags_AppendNewline))
+        {
+            Newline(this);
+        }
+        Print(this);
+        if (FlagIsSet(Flags, print_buffer_flags_Exit))
+        {
+            exit(1);
+        }
+    }
+};
+
+#define PRINT_BUFFER_HELPER(Name, Size, FD, _Flags)    \
+    STRING_BUILDER(__##Name, Size);                          \
+    print_buffer Name;                                       \
+    Name.FileDescriptor = FD;                                \
+    Name.Builder = __##Name;                                 \
+    Name.Flags = _Flags
+
+#define PRINT_BUFFER(Name, Size, Flags) PRINT_BUFFER_HELPER(Name, Size, STDOUT_FILENO, Flags)
+#define WARN_BUFFER(Name, Size, Init)                 \
+    PRINT_BUFFER_HELPER(Name, Size, STDERR_FILENO, print_buffer_flags_AppendNewline);  \
+    Append(&Name, "WARNING: ");                             \
+    Append(&Name, Init)
+#define WARN(String) WARN_BUFFER(_, 1024, String)
+#define WARN_BUFFER_LINE(Name, Size, Line, Init)               \
+    WARN_BUFFER(Name, Size, "Line ");                             \
+    Append(&Name, Line);                                          \
+    Append(&Name, ": ");                                          \
+    Append(&Name, Init)
+#define PANIC_BUFFER(Name, Size, Init)                                \
+    PRINT_BUFFER_HELPER(Name, Size, STDERR_FILENO, print_buffer_flags_AppendNewline | print_buffer_flags_Exit); \
+    Append(&Name, "ERROR: ");                                           \
+    Append(&Name, Init)
+#define PANIC(String) PANIC_BUFFER(_, 1024, String)
+#define PANIC_BUFFER_LINE(Name, Size, Line, Init)               \
+    PANIC_BUFFER(Name, Size, "Line ");                             \
+    Append(&Name, Line);                                           \
+    Append(&Name, ": ");                                           \
+    Append(&Name, Init)
+#define PANIC_LINE(Line, String) PANIC_BUFFER_LINE(_, 1024, Line, String)
+
 
 struct parser
 {
@@ -416,6 +480,11 @@ size_t Append(memory_arena *Arena, string_reference String)
     return Result;
 }
 
+size_t Append(memory_arena *Arena, token_type TokenType)
+{
+    return Append(Arena, TokenTypeNames[TokenType]);
+}
+
 size_t Append(memory_arena *Arena, buffer Buffer)
 {
     return Append(Arena, StringReference(Buffer));
@@ -468,6 +537,34 @@ size_t Append(memory_arena *Arena, s32 Integer)
     return Result;
 }
 
+size_t Append(memory_arena *Arena, u32 Integer)
+{
+    size_t Result = 0;
+    if (Integer == 0)
+    {
+        Result += Append(Arena, '0');
+    }
+    else
+    {
+        string_reference Digits = BeginString(Arena);
+        while (Integer)
+        {
+            Digits.Length += Append(Arena, (char)('0' + (Integer % 10)));
+            Integer /= 10;
+        }
+        Result += Digits.Length;
+        char *Head = Digits.Memory;
+        char *Tail = Head + Digits.Length - 1;
+        while (Head < Tail)
+        {
+            char Temp = *Tail;
+            *Tail-- = *Head;
+            *Head++ = Temp;
+        }
+    }
+    return Result;
+}
+
 s32 StringLength(const char *String)
 {
     s32 Result = 0;
@@ -489,88 +586,98 @@ string_reference StringReference(const char *String)
 string_reference StringReference(string_builder *Builder)
 {
     string_reference Result;
-    Result.Memory = Builder->Memory;
-    Result.Length = Builder->Arena.Allocated;
+    Result.Memory = (char *)Builder->Memory;
+    Result.Length = Builder->Allocated;
     return Result;
 }
 
 void Reset(string_builder *Builder)
 {
-    Builder->Arena.Size = sizeof Builder->Memory;
-    Builder->Arena.Allocated = 0;
-    Builder->Arena.Memory = Builder->Memory;
+    Builder->Allocated = 0;
 }
 
-string_builder *Append(string_builder *Builder, const char *String)
+print_buffer *Append(print_buffer *Buffer, const char *String)
 {
-    Append(&Builder->Arena, String);
-    return Builder;
+    Append(&Buffer->Builder, String);
+    return Buffer;
 }
 
-string_builder *Append(string_builder *Builder, string_reference String)
+print_buffer *Append(print_buffer *Buffer, token_type TokenType)
 {
-    Append(&Builder->Arena, String);
-    return Builder;
+    Append(&Buffer->Builder, TokenType);
+    return Buffer;
 }
 
-string_builder *Append(string_builder *Builder, buffer Buffer)
+print_buffer *Append(print_buffer *Buffer, string_reference String)
 {
-    Append(&Builder->Arena, Buffer);
-    return Builder;
+    Append(&Buffer->Builder, String);
+    return Buffer;
 }
 
-string_builder *Append(string_builder *Builder, char Char, u32 Count = 1)
+print_buffer *Append(print_buffer *Buffer, buffer Buf)
 {
-    Append(&Builder->Arena, Char, Count);
-    return Builder;
+    Append(&Buffer->Builder, Buf);
+    return Buffer;
 }
 
-string_builder *Append(string_builder *Builder, unsigned char Char, u32 Count = 1)
+print_buffer *Append(print_buffer *Buffer, char Char, u32 Count = 1)
 {
-    Append(&Builder->Arena, (char)Char, Count);
-    return Builder;
+    Append(&Buffer->Builder, Char, Count);
+    return Buffer;
 }
 
-string_builder *Append(string_builder *Builder, signed char Char, u32 Count = 1)
+print_buffer *Append(print_buffer *Buffer, unsigned char Char, u32 Count = 1)
 {
-    Append(&Builder->Arena, (char)Char, Count);
-    return Builder;
+    Append(&Buffer->Builder, (char)Char, Count);
+    return Buffer;
 }
 
-string_builder *Newline(string_builder *Builder, u32 Count = 1)
+print_buffer *Append(print_buffer *Buffer, signed char Char, u32 Count = 1)
 {
-    Newline(&Builder->Arena, Count);
-    return Builder;
+    Append(&Buffer->Builder, (char)Char, Count);
+    return Buffer;
 }
 
-string_builder *Space(string_builder *Builder, u32 Count = 1)
+print_buffer *Newline(print_buffer *Buffer, u32 Count)
 {
-    Space(&Builder->Arena, Count);
-    return Builder;
+    Newline(&Buffer->Builder, Count);
+    return Buffer;
 }
 
-string_builder *Tab(string_builder *Builder, u32 Count = 1)
+print_buffer *Space(print_buffer *Buffer, u32 Count = 1)
 {
-    Tab(&Builder->Arena, Count);
-    return Builder;
+    Space(&Buffer->Builder, Count);
+    return Buffer;
 }
 
-string_builder *Append(string_builder *Builder, s32 Integer)
+print_buffer *Tab(print_buffer *Buffer, u32 Count = 1)
 {
-    Append(&Builder->Arena, Integer);
-    return Builder;
+    Tab(&Buffer->Builder, Count);
+    return Buffer;
 }
 
-string_builder *Append(string_builder *Builder, r32 Real)
+print_buffer *Append(print_buffer *Buffer, s32 Integer)
 {
-    Append(&Builder->Arena, Real);
-    return Builder;
+    Append(&Buffer->Builder, Integer);
+    return Buffer;
 }
 
-string_builder *Append(string_builder *Builder, r64 Real)
+print_buffer *Append(print_buffer *Buffer, u32 Integer)
 {
-    Append(&Builder->Arena, Real);
-    return Builder;
+    Append(&Buffer->Builder, Integer);
+    return Buffer;
+}
+
+print_buffer *Append(print_buffer *Buffer, r32 Real)
+{
+    Append(&Buffer->Builder, Real);
+    return Buffer;
+}
+
+print_buffer *Append(print_buffer *Buffer, r64 Real)
+{
+    Append(&Buffer->Builder, Real);
+    return Buffer;
 }
 
 ssize_t Print(string_reference String)
@@ -580,17 +687,22 @@ ssize_t Print(string_reference String)
 
 ssize_t Print(string_builder *Builder)
 {
-    return Write(STDOUT_FILENO, Builder->Memory, Builder->Arena.Allocated);
+    return Write(STDOUT_FILENO, Builder->Memory, Builder->Allocated);
+}
+
+ssize_t Print(print_buffer *Buffer)
+{
+    return Write(Buffer->FileDescriptor, Buffer->Builder.Memory, Buffer->Builder.Allocated);
 }
 
 void DebugLexer(parser *Parser)
 {
-    string_builder Builder;
+    STRING_BUILDER(Builder, 1024);
     for (s32 LexIndex = 0; LexIndex < Parser->LexemeCount; ++LexIndex)
     {
         Reset(&Builder);
         lexeme *Lexeme = Parser->Lexemes + LexIndex;
-        Append(&Builder, TokenTypeNames[Lexeme->Type]);
+        Append(&Builder, Lexeme->Type);
         Space(&Builder);
         switch (Lexeme->Type)
         {
@@ -730,15 +842,14 @@ signed char GetChar(environment *Environment, timed_input *TimedInput = 0)
         WriteCharacter(Char);
     }
 #if DEBUG_TIMED_INPUT
-    string_builder Builder;
-    Reset(&Builder);
-    Append(&Builder, "Char: ");
-    Append(&Builder, Char);
-    Append(&Builder, '(');
-    Append(&Builder, (s32)Char);
-    Append(&Builder, ")");
-    Newline(&Builder);
-    Print(&Builder);
+    {
+        PRINT_BUFFER(Builder, 1024, print_buffer_flags_AppendNewline);
+        Append(&Builder, "Char: ");
+        Append(&Builder, Char);
+        Append(&Builder, '(');
+        Append(&Builder, (s32)Char);
+        Append(&Builder, ")");
+    }
 #endif
     return Char;
 }
@@ -798,30 +909,6 @@ void SkipToEndOfLine(parser *Parser)
     while (!IsEOF(Parser) && GetChar(Parser) != '\n');
 }
 
-void Warn(const char *Format, ...)
-{
-    va_list args;
-    va_start(args, Format);
-
-    fprintf(stderr, "WARNING: ");
-    vfprintf(stderr, Format, args);
-    fprintf(stderr, "\n");
-
-    va_end(args);
-}
-
-void Warn(parser *Parser, const char *Format, ...)
-{
-    va_list args;
-    va_start(args, Format);
-
-    fprintf(stderr, "WARNING: Line %u: ", Parser->SourceLineNumber);
-    vfprintf(stderr, Format, args);
-    fprintf(stderr, "\n");
-
-    va_end(args);
-}
-
 void Panic(const char *Format, ...)
 {
     va_list args;
@@ -863,17 +950,38 @@ void Panic(lexeme *Lexeme, const char *Format, ...)
 
 void PrintUsageAndExit(program *Program)
 {
-    string_builder Builder;
-    Newline(Append(Append(Append(&Builder, "Usage: "), Program->ExecutableName), " <src>"));
-    Newline(Append(Append(Space(&Builder, 7), Program->ExecutableName), " <src> -x [-o <out>]"));
-    Newline(Append(Append(Space(&Builder, 7), Program->ExecutableName), " [--help]"));
-    Newline(Append(&Builder, "Execute a BASIC program."));
-    Newline(&Builder);
-    Newline(Append(Tab(&Builder), "-h, --help  display this help and exit"));
-    Newline(Append(Tab(&Builder), "-o <out>    store the executable BASIC program at <out> (used with -x)"));
-    Newline(Append(Tab(&Builder), "-x          create an executable version of the given BASIC program <src>"));
-    Print(&Builder);
-    exit(1);
+    PRINT_BUFFER(PB, 1024, print_buffer_flags_Exit);
+
+    Append(&PB, "Usage: ");
+    Append(&PB, Program->ExecutableName);
+    Append(&PB, " <src>");
+    Newline(&PB);
+
+    Space(&PB, 7);
+    Append(&PB, Program->ExecutableName);
+    Append(&PB, " <src> -x [-o <out>]");
+    Newline(&PB);
+
+    Space(&PB, 7);
+    Append(&PB, Program->ExecutableName);
+    Append(&PB, " [--help]");
+    Newline(&PB);
+
+    Append(&PB, "Execute a BASIC program.");
+    Newline(&PB);
+    Newline(&PB);
+
+    Tab(&PB);
+    Append(&PB, "-h, --help  display this help and exit");
+    Newline(&PB);
+    
+    Tab(&PB);
+    Append(&PB, "-o <out>    store the executable BASIC program at <out> (used with -x)");
+    Newline(&PB);
+
+    Tab(&PB);
+    Append(&PB, "-x          create an executable version of the given BASIC program <src>");
+    Newline(&PB);
 }
 
 buffer NewBuffer(char *Contents, size_t Size)
@@ -926,7 +1034,8 @@ lexeme *LookupVariable(environment *Environment, lexeme *Lexeme)
     lexeme *Result = FindVariable(Environment, Lexeme);
     if (!Result)
     {
-        Panic(Lexeme, "Cannot find variable %.*s", Lexeme->String.Length, Lexeme->String.Memory);
+        PANIC_BUFFER_LINE(Panic, 1024, Lexeme->LineNumber, "Cannot find variable ");
+        Append(&Panic, Lexeme->String);
     }
     return Result;
 }
@@ -936,11 +1045,12 @@ lexeme *DeclareVariable(environment *Environment, lexeme *Lexeme)
     lexeme *Variable = FindVariable(Environment, Lexeme);
     if (Variable)
     {
-        Panic(Lexeme, "Double declaration of %.*s", Lexeme->String.Length, Lexeme->String.Memory);
+        PANIC_BUFFER_LINE(Panic, 1024, Lexeme->LineNumber, "Double declaration of ");
+        Append(&Panic, Lexeme->String);
     }
     if (ArrayCount(Environment->VariableValues) <= Environment->VariableCount)
     {
-        Panic(Lexeme, "Unable to allocate memory for a new variable.");
+        PANIC_LINE(Lexeme->LineNumber, "Unable to allocate memory for a new variable.");
     }
     Environment->VariableNames[Environment->VariableCount] = Lexeme->String;
     lexeme *Result = Environment->VariableValues + Environment->VariableCount;
@@ -1101,8 +1211,7 @@ lexeme *LexCommand(parser *Parser, string_reference String, token_type Type, con
 lexeme *LexAlpha(parser *Parser)
 {
     memory_arena *Arena = &Parser->StringArena;
-    string_builder Builder;
-    Reset(&Builder);
+    STRING_BUILDER(Builder, 1024);
     signed char Char = PeekChar(Parser);
 
     while (isalpha(Char) || isdigit(Char) || Char == '_')
@@ -1295,7 +1404,10 @@ lexeme *Match(parser *Parser, token_type Type)
     lexeme *Lexeme = GetLex(Parser);
     if (Lexeme->Type != Type)
     {
-        Panic(Lexeme, "Expected %s, not %s", TokenTypeNames[Type].Memory, TokenTypeNames[Lexeme->Type].Memory);
+        PANIC_BUFFER_LINE(Panic, 1024, Lexeme->LineNumber, "Expected ");
+        Append(&Panic, Type);
+        Append(&Panic, ", not ");
+        Append(&Panic, Lexeme->Type);
     }
     return Lexeme;
 }
@@ -1349,7 +1461,7 @@ lexeme *Push(lexeme_stack *Stack, lexeme *Lexeme)
 {
     if (ArrayCount(Stack->Stack) <= Stack->Count)
     {
-        Panic(Lexeme, "Stack overflow");
+        PANIC_LINE(Lexeme->LineNumber, "Stack overflow");
     }
     Stack->Stack[Stack->Count++] = Lexeme;
     return Lexeme;
@@ -1359,7 +1471,7 @@ lexeme *Pop(lexeme_stack *Stack, lexeme **Lexeme)
 {
     if (Stack->Count < 1)
     {
-        Panic(*Lexeme, "Stack underflow");
+        PANIC_LINE((*Lexeme)->LineNumber, "Stack underflow");
     }
     *Lexeme = Stack->Stack[--Stack->Count];
     return *Lexeme;
@@ -1453,7 +1565,8 @@ lexeme *SimpleExpression(parser *Parser, lexeme_stack *OperatorStack)
         } break;
         default:
         {
-            Panic(Peek, "Invalid expression LHS %s\n", TokenTypeNames[Peek->Type].Memory);
+            PANIC_BUFFER_LINE(Panic, 1024, Peek->LineNumber, "Invalid expression LHS ");
+            Append(&Panic, Peek->Type);
         }
     }
     return Sentinel.Right;
@@ -1527,7 +1640,8 @@ lexeme *DimStatement(parser *Parser)
     lexeme *Id = Match(Parser, token_type_ID);
     if (!Id->IsString)
     {
-        Panic(Id, "Can only DIM string variables, not ones like %.*s\n", Id->String.Length, Id->String.Memory);
+        PANIC_BUFFER_LINE(Panic, 1024, Id->LineNumber, "Can only DIM string variables, not ones like ");
+        Append(&Panic, Id->String);
     }
     Match(Parser, token_type_OBRACKET);
     lexeme *Integer = Match(Parser, token_type_INTEGER);
@@ -1776,13 +1890,17 @@ lexeme *EvaluateEquality(environment *Environment, lexeme *LHS, lexeme *RHS, lex
             } break;
             default:
             {
-                Panic(LHS, "Cannot compare values of type %s", TokenTypeNames[LHS->Type].Memory);
+                PANIC_BUFFER_LINE(Panic, 1024, LHS->LineNumber, "Cannot compare values of type ");
+                Append(&Panic, LHS->Type);
             } break;
         }
     }
     else
     {
-        Panic(LHS, "Cannot compare values with different types %s and %s", TokenTypeNames[LHS->Type].Memory, TokenTypeNames[RHS->Type].Memory);
+        PANIC_BUFFER_LINE(Panic, 1024, LHS->LineNumber, "Cannot compare values with different types ");
+        Append(&Panic, LHS->Type);
+        Append(&Panic, " and ");
+        Append(&Panic, RHS->Type);
     }
     *Output = Result;
     return Output;
@@ -1800,7 +1918,10 @@ lexeme *NumberOperation(environment *Environment, lexeme *Operator, lexeme *Outp
     EvaluateExpression(Environment, Operator->Right, &RHS);
     if (!IsNumber(LHS.Type) || !IsNumber(RHS.Type))
     {
-        Panic(Operator, "Cannot numerically operate on types %s and %s", TokenTypeNames[LHS.Type].Memory, TokenTypeNames[RHS.Type].Memory);
+        PANIC_BUFFER_LINE(Panic, 1024, Operator->LineNumber, "Cannot numerically operate on types ");
+        Append(&Panic, LHS.Type);
+        Append(&Panic, " and ");
+        Append(&Panic, RHS.Type);
     }
     else if (LHS.Type == token_type_INTEGER && RHS.Type == token_type_INTEGER)
     {
@@ -1831,7 +1952,8 @@ lexeme *NumberOperation(environment *Environment, lexeme *Operator, lexeme *Outp
             } break;
             default:
             {
-                Panic(Operator, "No number operation defined for type %s", TokenTypeNames[Operator->Type].Memory);
+                PANIC_BUFFER_LINE(Panic, 1024, Operator->LineNumber, "No number operation defined for type ");
+                Append(&Panic, Operator->Type);
             } break;
         }
     }
@@ -1864,7 +1986,8 @@ lexeme *NumberOperation(environment *Environment, lexeme *Operator, lexeme *Outp
             } break;
             default:
             {
-                Panic(Operator, "No number operation defined for type %s", TokenTypeNames[Operator->Type].Memory);
+                PANIC_BUFFER_LINE(Panic, 1024, Operator->LineNumber, "No number operation defined for type ");
+                Append(&Panic, Operator->Type);
             } break;
         }
     }
@@ -2227,7 +2350,7 @@ size_t RenderExpression(lexeme *Expr, memory_arena *Arena)
             {
                 if (sizeof Stack <= StackCount)
                 {
-                    Panic(Expr, "stack overflow");
+                    PANIC_LINE(Expr->LineNumber, "stack overflow");
                 }
                 RightBalanceStack[StackCount] = NextRightBalance;
                 RightBalance = NextRightBalance = 0;
@@ -2497,15 +2620,14 @@ s32 StringInput(environment *Environment, lexeme *Id, r32 AllowedSeconds = -1, l
     {
         Char = GetChar(Environment, &TimedInput);
 #if DEBUG_TIMED_INPUT
-        string_builder Builder;
-        Reset(&Builder);
-        Append(&Builder, "TimedOut: ");
-        Append(&Builder, TimedInput.TimedOut);
-        Newline(&Builder);
-        Append(&Builder, "Polled: ");
-        Append(&Builder, TimedInput.Polled);
-        Newline(&Builder);
-        Print(&Builder);
+        {
+            PRINT_BUFFER(Builder, 1024, print_buffer_flags_AppendNewline);
+            Append(&Builder, "TimedOut: ");
+            Append(&Builder, TimedInput.TimedOut);
+            Newline(&Builder);
+            Append(&Builder, "Polled: ");
+            Append(&Builder, TimedInput.Polled);
+        }
 #endif
         if (TimedInput.TimedOut)
         {
@@ -2927,7 +3049,7 @@ int main(int ArgCount, char *Args[])
     if (Read(Executable, &CbasFooter, sizeof CbasFooter) <= 0 ||
         CbasFooter.MagicNumber.Integer != CbasMagicNumber.Integer)
     {
-        Warn("Missing CBAS Magic Number. Defaulting to CLI mode.");
+        WARN("Missing CBAS Magic Number. Defaulting to CLI mode.");
         Program.DataOffset = Program.FooterOffset = Program.ExecutableFileSize;
     }
     else
@@ -3001,12 +3123,13 @@ int main(int ArgCount, char *Args[])
                 }
                 else
                 {
-                    Warn("-o option requires an <out> value");
+                    WARN("-o option requires an <out> value");
                 }
             }
             else if (Option[0] == '-')
             {
-                Warn("Ignoring unknown option %s", Option);
+                WARN_BUFFER(Warn, 1024, "Ignoring unknown option ");
+                Append(&Warn, Option);
             }
             else if (!Program.SourcePath)
             {
@@ -3014,7 +3137,8 @@ int main(int ArgCount, char *Args[])
             }
             else
             {
-                Warn("Too many positional parameters encountered at %s", Option);
+                WARN_BUFFER(Warn, 1024, "Too many positional parameters encountered at ");
+                Append(&Warn, Option);
             }
         } while (ArgIndex < ArgCount);
 
@@ -3087,7 +3211,7 @@ int main(int ArgCount, char *Args[])
         {
             if (Program.NewExecutablePath)
             {
-                Warn("-o option is only used with -x");
+                WARN("-o option is only used with -x");
             }
             Parser->Size = Seek(SourceCodeFile, 0, SEEK_END);
             Seek(SourceCodeFile, 0, SEEK_SET);

@@ -66,8 +66,7 @@ string_builder *AppendFailFooter(string_builder *Builder)
 int ExpressionTest(environment *Environment, string_reference ExpressionString, string_reference Expected, s32 ExpectedValue)
 {
     lexeme Value;
-    string_builder Builder;
-    Reset(&Builder);
+    STRING_BUILDER(Builder, 1024);
     string_reference Actual = ParseTest(Environment, ExpressionString, &Value);
     int Success = Equals(Expected, Actual) && (Value.Type == token_type_BOOLEAN || Value.Type == token_type_INTEGER) && Value.Integer == ExpectedValue;
     if (Success)
@@ -96,8 +95,7 @@ int AboutEqual(r32 A, r32 B)
 int ExpressionTest(environment *Environment, string_reference ExpressionString, string_reference Expected, r64 ExpectedValue)
 {
     lexeme Value;
-    string_builder Builder;
-    Reset(&Builder);
+    STRING_BUILDER(Builder, 1024);
     string_reference Actual = ParseTest(Environment, ExpressionString, &Value);
     int Success = Equals(Expected, Actual) && Value.Type == token_type_REAL && AboutEqual(Value.Real, ExpectedValue);
     if (Success)
@@ -119,11 +117,9 @@ int ExpressionTest(environment *Environment, string_reference ExpressionString, 
 int ExpressionTest(environment *Environment, string_reference ExpressionString, string_reference Expected, char ExpectedValue)
 {
     lexeme Value;
-    string_builder Builder;
-    Reset(&Builder);
-    string_builder ExpectedValueBuilder;
-    Reset(&ExpectedValueBuilder);
-    RenderString({1, &ExpectedValue}, &ExpectedValueBuilder.Arena);
+    STRING_BUILDER(Builder, 1024);
+    STRING_BUILDER(ExpectedValueBuilder, 1024);
+    RenderString({1, &ExpectedValue}, &ExpectedValueBuilder);
     string_reference ExpectedValueString = StringReference(&ExpectedValueBuilder);
 
     string_reference Actual = ParseTest(Environment, ExpressionString, &Value);
@@ -146,11 +142,9 @@ int ExpressionTest(environment *Environment, string_reference ExpressionString, 
 
 int ExpressionTest(environment *Environment, string_reference ExpressionString, string_reference Expected, const char *ExpectedValue)
 {
-    string_builder Builder;
-    Reset(&Builder);
-    string_builder ExpectedValueBuilder;
-    Reset(&ExpectedValueBuilder);
-    RenderString(StringReference(ExpectedValue), &ExpectedValueBuilder.Arena);
+    STRING_BUILDER(Builder, 1024);
+    STRING_BUILDER(ExpectedValueBuilder, 1024);
+    RenderString(StringReference(ExpectedValue), &ExpectedValueBuilder);
     string_reference ExpectedValueString = StringReference(&ExpectedValueBuilder);
 
     lexeme Value;
@@ -197,8 +191,7 @@ string_builder *AppendWrappedString(string_builder *Builder, buffer String)
 }
 
 #define ExpectEquals(Failures, A, B) {                              \
-        string_builder Builder;                                     \
-        Reset(&Builder);                                            \
+        STRING_BUILDER(Builder, 1024);                               \
         u8 Success = Equals(A, B);                                  \
         if (Success)                                                \
         {                                                           \
@@ -227,8 +220,7 @@ string_builder *AppendWrappedString(string_builder *Builder, buffer String)
     }
 
 #define ExpectNotEquals(Failures, A, B) {       \
-        string_builder Builder;                 \
-        Reset(&Builder);                        \
+        STRING_BUILDER(Builder, 1024);          \
         u8 Success = !Equals(A, B);              \
         if (Success)                            \
         {                                           \

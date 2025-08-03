@@ -35,3 +35,8 @@ int WriteCharacter(int Character)
     }
     return Result;
 }
+
+s32 FlagIsSet(s32 Field, s32 Flag)
+{
+    return Flag == (Field & Flag);
+}
