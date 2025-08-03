@@ -13,47 +13,42 @@ string_reference ParseTest(environment *Environment, string_reference Expression
     return Actual;
 }
 
-size_t AppendExpectingHeader(string_builder *Builder, string_reference Expected)
+string_builder *AppendExpectingHeader(string_builder *Builder, string_reference Expected)
 {
-    size_t Result = 0;
-    Result += Append(Builder, "Expecting: ");
-    Result += Append(Builder, Expected);
-    Result += Append(Builder, '=');
-    return Result;
+    Append(Builder, "Expecting: ");
+    Append(Builder, Expected);
+    Append(Builder, '=');
+    return Builder;
 }
 
-size_t AppendExpectingFooter(string_builder *Builder)
+string_builder *AppendExpectingFooter(string_builder *Builder)
 {
-    size_t Result = 0;
-    Result += Append(Builder, " . . . ");
-    return Result;
+    Append(Builder, " . . . ");
+    return Builder;
 }
 
-size_t AppendPass(string_builder *Builder)
+string_builder *AppendPass(string_builder *Builder)
 {
-    size_t Result = 0;
-    Result += Append(Builder, "\033[32mPASS\033[0m");
-    Result += Newline(Builder);
-    return Result;
+    Append(Builder, "\033[32mPASS\033[0m");
+    Newline(Builder);
+    return Builder;
 }
 
-size_t AppendFailHeader(string_builder *Builder, string_reference Actual)
+string_builder *AppendFailHeader(string_builder *Builder, string_reference Actual)
 {
-    size_t Result = 0;
-    Result += Append(Builder, "\033[31mFAIL");
-    Result += Newline(Builder);
-    Result += Append(Builder, "Actual:    ");
-    Result += Append(Builder, Actual);
-    Result += Append(Builder, '=');
-    return Result;
+    Append(Builder, "\033[31mFAIL");
+    Newline(Builder);
+    Append(Builder, "Actual:    ");
+    Append(Builder, Actual);
+    Append(Builder, '=');
+    return Builder;
 }
 
-size_t AppendFailFooter(string_builder *Builder)
+string_builder *AppendFailFooter(string_builder *Builder)
 {
-    size_t Result = 0;
-    Result += Append(Builder, "\033[0m");
-    Result += Newline(Builder);
-    return Result;
+    Append(Builder, "\033[0m");
+    Newline(Builder);
+    return Builder;
 }
 
 #define APPEND_EXPECTING(Builder, Expected, ExpectedValue) {    \
@@ -177,33 +172,28 @@ int ExpressionTest(environment *Environment, string_reference ExpressionString, 
     return !Success;
 }
 
-size_t AppendWrappedString(string_builder *Builder, const char *String)
+string_builder *AppendWrappedString(string_builder *Builder, const char *String)
 {
-    size_t Result = 0;
     Append(Builder, '"');
     Append(Builder, String);
     Append(Builder, '"');
-    return Result;
+    return Builder;
 }
 
-#define APPEND_WRAPPED_STRING(Result, Builder, Type, String) {   \
-    Result += Append(Builder, Type);                            \
-    Result += Append(Builder, "(\"");                             \
-    Result += Append(Builder, String);                                            \
-    Result += Append(Builder, "\")");                                               \
-    }
-size_t AppendWrappedString(string_builder *Builder, string_reference String)
+#define APPEND_WRAPPED_STRING(Builder, Type, String)   \
+    Append(Builder, Type);                            \
+    Append(Builder, "(\"");                             \
+    Append(Builder, String);                                            \
+    Append(Builder, "\")");                                               \
+    return Builder
+string_builder *AppendWrappedString(string_builder *Builder, string_reference String)
 {
-    size_t Result = 0;
-    APPEND_WRAPPED_STRING(Result, Builder, "STRING_REFERENCE", String);
-    return Result;
+    APPEND_WRAPPED_STRING(Builder, "STRING_REFERENCE", String);
 }
 
-size_t AppendWrappedString(string_builder *Builder, buffer String)
+string_builder *AppendWrappedString(string_builder *Builder, buffer String)
 {
-    size_t Result = 0;
-    APPEND_WRAPPED_STRING(Result, Builder, "BUFFER", String);
-    return Result;
+    APPEND_WRAPPED_STRING(Builder, "BUFFER", String);
 }
 
 #define ExpectEquals(Failures, A, B) {                              \

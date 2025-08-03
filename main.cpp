@@ -1,15 +1,13 @@
-#include <fcntl.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
-#include <stdarg.h>
 #include <math.h>
 #include <time.h>
 #include <poll.h>
-#include <sys/stat.h>
+
 
 #define RUN_TESTS 1
-#define PRINT_SUCCESSFUL_TESTS 1
+#define PRINT_SUCCESSFUL_TESTS 0
 #define DEBUG_LEXER 0
 #define DEBUG_STATEMENT 0
 #define DEBUG_EVALUATE_STATEMENT 0
@@ -360,7 +358,7 @@ string_reference StringReference(buffer Buffer)
 size_t Append(memory_arena *Arena, char Char, u32 Count = 1)
 {
     size_t Result = 0;
-    if (Count-- && Arena->Allocated < Arena->Size)
+    while (Count-- && Arena->Allocated < Arena->Size)
     {
         Result++;
         ((char*)Arena->Memory)[Arena->Allocated++] = Char;
@@ -386,6 +384,11 @@ size_t Newline(memory_arena *Arena, u32 Count = 1)
 size_t Space(memory_arena *Arena, u32 Count = 1)
 {
     return Append(Arena, ' ', Count);
+}
+
+size_t Tab(memory_arena *Arena, u32 Count = 1)
+{
+    return Append(Arena, '\t', Count);
 }
 
 size_t Append(memory_arena *Arena, const char *String)
@@ -498,69 +501,86 @@ void Reset(string_builder *Builder)
     Builder->Arena.Memory = Builder->Memory;
 }
 
-size_t Append(string_builder *Builder, const char *String)
+string_builder *Append(string_builder *Builder, const char *String)
 {
-    return Append(&Builder->Arena, String);
+    Append(&Builder->Arena, String);
+    return Builder;
 }
 
-size_t Append(string_builder *Builder, string_reference String)
+string_builder *Append(string_builder *Builder, string_reference String)
 {
-    return Append(&Builder->Arena, String);
+    Append(&Builder->Arena, String);
+    return Builder;
 }
 
-size_t Append(string_builder *Builder, buffer Buffer)
+string_builder *Append(string_builder *Builder, buffer Buffer)
 {
-    return Append(&Builder->Arena, Buffer);
+    Append(&Builder->Arena, Buffer);
+    return Builder;
 }
 
-size_t Append(string_builder *Builder, char Char, u32 Count = 1)
+string_builder *Append(string_builder *Builder, char Char, u32 Count = 1)
 {
-    return Append(&Builder->Arena, Char, Count);
+    Append(&Builder->Arena, Char, Count);
+    return Builder;
 }
 
-size_t Append(string_builder *Builder, unsigned char Char, u32 Count = 1)
+string_builder *Append(string_builder *Builder, unsigned char Char, u32 Count = 1)
 {
-    return Append(&Builder->Arena, (char)Char, Count);
+    Append(&Builder->Arena, (char)Char, Count);
+    return Builder;
 }
 
-size_t Append(string_builder *Builder, signed char Char, u32 Count = 1)
+string_builder *Append(string_builder *Builder, signed char Char, u32 Count = 1)
 {
-    return Append(&Builder->Arena, (char)Char, Count);
+    Append(&Builder->Arena, (char)Char, Count);
+    return Builder;
 }
 
-size_t Newline(string_builder *Builder, u32 Count = 1)
+string_builder *Newline(string_builder *Builder, u32 Count = 1)
 {
-    return Newline(&Builder->Arena, Count);
+    Newline(&Builder->Arena, Count);
+    return Builder;
 }
 
-size_t Space(string_builder *Builder, u32 Count = 1)
+string_builder *Space(string_builder *Builder, u32 Count = 1)
 {
-    return Space(&Builder->Arena, Count);
+    Space(&Builder->Arena, Count);
+    return Builder;
 }
 
-size_t Append(string_builder *Builder, s32 Integer)
+string_builder *Tab(string_builder *Builder, u32 Count = 1)
 {
-    return Append(&Builder->Arena, Integer);
+    Tab(&Builder->Arena, Count);
+    return Builder;
 }
 
-size_t Append(string_builder *Builder, r32 Real)
+string_builder *Append(string_builder *Builder, s32 Integer)
 {
-    return Append(&Builder->Arena, Real);
+    Append(&Builder->Arena, Integer);
+    return Builder;
 }
 
-size_t Append(string_builder *Builder, r64 Real)
+string_builder *Append(string_builder *Builder, r32 Real)
 {
-    return Append(&Builder->Arena, Real);
+    Append(&Builder->Arena, Real);
+    return Builder;
+}
+
+string_builder *Append(string_builder *Builder, r64 Real)
+{
+    Append(&Builder->Arena, Real);
+    return Builder;
 }
 
 ssize_t Print(string_reference String)
 {
-    return write(STDOUT_FILENO, String.Memory, String.Length);
+    return Write(STDOUT_FILENO, String.Memory, String.Length);
 }
 
 ssize_t Print(string_builder *Builder)
 {
-    return write(STDOUT_FILENO, Builder->Memory, Builder->Arena.Allocated);
+    return Write(STDOUT_FILENO, Builder->Memory, Builder->Arena.Allocated);
 }
 
 void DebugLexer(parser *Parser)
@@ -694,20 +714,20 @@ signed char GetChar(environment *Environment, timed_input *TimedInput = 0)
     }
     TimedInput->TimedOut = 0;
 
-    signed char Char = getchar();
+    signed char Char = ReadCharacter();
     TimedInput->Polled = (Char == EOF);
     if (TimedInput->Polled)
     {
         Environment->IsInteractive = 1;
-        TimedInput->TimedOut = poll(&FileDescriptor, 1, TimedInput->TimeoutMilliseconds) <= 0;
+        TimedInput->TimedOut = Poll(&FileDescriptor, 1, TimedInput->TimeoutMilliseconds) <= 0;
         if (!TimedInput->TimedOut)
         {
-            Char = getchar();
+            Char = ReadCharacter();
         }
     }
     else if (!Environment->IsInteractive)
     {
-        putchar(Char);
+        WriteCharacter(Char);
     }
 #if DEBUG_TIMED_INPUT
     string_builder Builder;
@@ -786,6 +806,8 @@ void Warn(const char *Format, ...)
     fprintf(stderr, "WARNING: ");
     vfprintf(stderr, Format, args);
     fprintf(stderr, "\n");
+
+    va_end(args);
 }
 
 void Warn(parser *Parser, const char *Format, ...)
@@ -793,9 +815,11 @@ void Warn(parser *Parser, const char *Format, ...)
     va_list args;
     va_start(args, Format);
 
-    fprintf(stderr, "Line %u: ", Parser->SourceLineNumber);
+    fprintf(stderr, "WARNING: Line %u: ", Parser->SourceLineNumber);
     vfprintf(stderr, Format, args);
     fprintf(stderr, "\n");
+
+    va_end(args);
 }
 
 void Panic(const char *Format, ...)
@@ -803,9 +827,11 @@ void Panic(const char *Format, ...)
     va_list args;
     va_start(args, Format);
 
+    fprintf(stderr, "ERROR: ");
     vfprintf(stderr, Format, args);
     fprintf(stderr, "\n");
 
+    va_end(args);
     exit(1);
 }
 
@@ -814,10 +840,11 @@ void Panic(parser *Parser, const char *Format, ...)
     va_list args;
     va_start(args, Format);
 
-    fprintf(stderr, "Line %u: ", Parser->SourceLineNumber);
+    fprintf(stderr, "ERROR: Line %u: ", Parser->SourceLineNumber);
     vfprintf(stderr, Format, args);
     fprintf(stderr, "\n");
 
+    va_end(args);
     exit(1);
 }
 
@@ -826,24 +853,27 @@ void Panic(lexeme *Lexeme, const char *Format, ...)
     va_list args;
     va_start(args, Format);
 
-    fprintf(stderr, "Line %u: ", Lexeme->LineNumber);
+    fprintf(stderr, "ERROR: Line %u: ", Lexeme->LineNumber);
     vfprintf(stderr, Format, args);
     fprintf(stderr, "\n");
 
+    va_end(args);
     exit(1);
 }
 
 void PrintUsageAndExit(program *Program)
 {
-    Panic("Usage: %s <src>\n"
-          "       %s <src> -x [-o <out>]\n"
-          "       %s [--help]\n"
-          "Execute a BASIC program.\n"
-          "\n"
-          "\t-h, --help  display this help and exit\n"
-          "\t-o <out>    store the executable BASIC program at <out> (used with -x)\n"
-          "\t-x          create an executable version of the given BASIC program <src>\n",
-          Program->ExecutableName, Program->ExecutableName, Program->ExecutableName);
+    string_builder Builder;
+    Newline(Append(Append(Append(&Builder, "Usage: "), Program->ExecutableName), " <src>"));
+    Newline(Append(Append(Space(&Builder, 7), Program->ExecutableName), " <src> -x [-o <out>]"));
+    Newline(Append(Append(Space(&Builder, 7), Program->ExecutableName), " [--help]"));
+    Newline(Append(&Builder, "Execute a BASIC program."));
+    Newline(&Builder);
+    Newline(Append(Tab(&Builder), "-h, --help  display this help and exit"));
+    Newline(Append(Tab(&Builder), "-o <out>    store the executable BASIC program at <out> (used with -x)"));
+    Newline(Append(Tab(&Builder), "-x          create an executable version of the given BASIC program <src>"));
+    Print(&Builder);
+    exit(1);
 }
 
 buffer NewBuffer(char *Contents, size_t Size)
@@ -2861,12 +2891,10 @@ struct cbas_footer
 
 int main(int ArgCount, char *Args[])
 {
-    int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
-    fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
+    FileControl(STDIN_FILENO, F_SETFL, FileControl(STDIN_FILENO, F_GETFL) | O_NONBLOCK);
 
     char StringMemory[65536];
     environment Environment;
-    Environment.IsInteractive = isatty(STDIN_FILENO);
     parser *Parser = &Environment.Parser;
     Parser->StringArena.Memory = StringMemory;
     Parser->StringArena.Size = sizeof StringMemory;
@@ -2884,20 +2912,19 @@ int main(int ArgCount, char *Args[])
             Program.ExecutableName = ++At;
         }
     }
-    FILE *Executable = fopen(Program.ExecutablePath, "rb");
-    if (!Executable)
+    int Executable = Open(Program.ExecutablePath, O_RDONLY);
+    if (Executable < 0)
     {
-        Panic("Cannot find executable %s", Program.ExecutablePath);
+        Panic("Cannot open executable file %s", Program.ExecutablePath);
     }
 
-    fseek(Executable, 0, SEEK_END);
-    Program.ExecutableFileSize = ftell(Executable);
+    Program.ExecutableFileSize = Seek(Executable, 0, SEEK_END);
     cbas_footer CbasFooter;
     magic_number CbasMagicNumber = {.String = {'C','B','A','S'}};
     Program.DataOffset = Program.FooterOffset = Program.ExecutableFileSize - sizeof CbasFooter;
 
-    fseek(Executable, Program.FooterOffset, SEEK_SET);
-    if (fread(&CbasFooter, sizeof CbasFooter, 1, Executable) <= 0 ||
+    Seek(Executable, Program.FooterOffset, SEEK_SET);
+    if (Read(Executable, &CbasFooter, sizeof CbasFooter) <= 0 ||
         CbasFooter.MagicNumber.Integer != CbasMagicNumber.Integer)
     {
         Warn("Missing CBAS Magic Number. Defaulting to CLI mode.");
@@ -2933,10 +2960,10 @@ int main(int ArgCount, char *Args[])
     u64 DataSize = Program.FooterOffset - Program.DataOffset;
     if (CbasFooter.Version)
     {
-        fseek(Executable, Program.DataOffset, SEEK_SET);
+        Seek(Executable, Program.DataOffset, SEEK_SET);
         Parser->Size = DataSize;
         Parser->Contents = (u8 *)malloc(Parser->Size);
-        fread(Parser->Contents, Parser->Size, 1, Executable);
+        Read(Executable, Parser->Contents, Parser->Size);
     }
     else
     {
@@ -2995,8 +3022,8 @@ int main(int ArgCount, char *Args[])
         {
             PrintUsageAndExit(&Program);
         }
-        FILE *SourceCodeFile = fopen(Program.SourcePath, "rb");
-        if (!SourceCodeFile)
+        int SourceCodeFile = Open(Program.SourcePath, O_RDONLY);
+        if (SourceCodeFile < 0)
         {
             Panic("Cannot open source code file %s", Program.SourcePath);
         }
@@ -3026,33 +3053,34 @@ int main(int ArgCount, char *Args[])
                 } while (Dest < End && *Source && *Source != '.');
                 *Dest = 0;
             }
-            FILE *NewExecutable = fopen(NewExecutablePath, "wb");
-            if (!NewExecutable)
+            int NewExecutable = Create(NewExecutablePath, 0);
+            if (NewExecutable < 0)
             {
                 Panic("Cannot open file %s for writing", NewExecutablePath);
             }
 
             u8 Buffer[1024*1024];
             size_t BytesRemaining = Program.DataOffset;
-            size_t BytesRead;
-            fseek(Executable, 0, SEEK_SET);
+            size_t BytesRead, BytesWritten;
+            Seek(Executable, 0, SEEK_SET);
             do
             {
-                BytesRead = fread(Buffer, 1, sizeof Buffer, Executable);
-                BytesRemaining -= fwrite(Buffer, 1, Min(BytesRead, BytesRemaining), NewExecutable);
+                BytesRead = Read(Executable, Buffer, sizeof Buffer);
+                BytesWritten = Write(NewExecutable, Buffer, Min(BytesRead, BytesRemaining));
+                BytesRemaining -= BytesWritten;
             } while (BytesRemaining);
             do
             {
-                BytesRead = fread(Buffer, 1, sizeof Buffer, SourceCodeFile);
-                fwrite(Buffer, 1, BytesRead, NewExecutable);
+                BytesRead = Read(SourceCodeFile, Buffer, sizeof Buffer);
+                Write(NewExecutable, Buffer, BytesRead);
             } while (BytesRead);
             CbasFooter.MagicNumber = CbasMagicNumber;
             CbasFooter.Version = 1;
             CbasFooter.DataOffset = Program.DataOffset;
 
-            fwrite(&CbasFooter, sizeof CbasFooter, 1, NewExecutable);
-            fclose(NewExecutable);
-            chmod(NewExecutablePath, 0755);
+            Write(NewExecutable, &CbasFooter, sizeof CbasFooter);
+            ChangeMode(NewExecutable, 0755);
+            Close(NewExecutable);
             return 0;
         }
         else
@@ -3061,15 +3089,14 @@ int main(int ArgCount, char *Args[])
             {
                 Warn("-o option is only used with -x");
             }
-            fseek(SourceCodeFile, 0, SEEK_END);
-            Parser->Size = ftell(SourceCodeFile);
-            fseek(SourceCodeFile, 0, SEEK_SET);
+            Parser->Size = Seek(SourceCodeFile, 0, SEEK_END);
+            Seek(SourceCodeFile, 0, SEEK_SET);
             Parser->Contents = (u8 *)malloc(Parser->Size);
-            fread(Parser->Contents, Parser->Size, 1, SourceCodeFile);
+            Read(SourceCodeFile, Parser->Contents, Parser->Size);
         }
-        fclose(SourceCodeFile);
+        Close(SourceCodeFile);
     }
-    fclose(Executable);
+    Close(Executable);
 
     Lex(Parser);
     lexeme EntryPoint = StatementList(Parser);
