@@ -275,6 +275,19 @@ enum print_buffer_flags
     print_buffer_flags_AppendNewline = 1 << 1,
 };
 
+enum print_string_flags
+{
+    print_string_flags_LeftJustify   = 1 << 0,
+};
+
+struct print_string_options
+{
+    s32 MinWidth;
+    s32 Flags;
+};
+
+print_string_options DefaultPrintStringOptions = {};
+
 struct print_buffer
 {
     int FileDescriptor;
@@ -303,6 +316,13 @@ struct print_buffer
     Name.Flags = _Flags
 
 #define PRINT_BUFFER(Name, Size, Flags) PRINT_BUFFER_HELPER(Name, Size, STDOUT_FILENO, Flags)
+#define PRINT(String) PRINT_BUFFER(_, 1024, 0); \
+    Append(&_, String)
+#define DEBUG_BUFFER(Name, Size, Init)                 \
+    PRINT_BUFFER(Name, Size, print_buffer_flags_AppendNewline);  \
+    Append(&Name, "DEBUG: ");                             \
+    Append(&Name, Init)
+#define DEBUG(String) DEBUG_BUFFER(_, 1024, String)
 #define WARN_BUFFER(Name, Size, Init)                 \
     PRINT_BUFFER_HELPER(Name, Size, STDERR_FILENO, print_buffer_flags_AppendNewline);  \
     Append(&Name, "WARNING: ");                             \
@@ -467,14 +487,37 @@ size_t Append(memory_arena *Arena, const char *String)
     return Result;
 }
 
-size_t Append(memory_arena *Arena, string_reference String)
+size_t Append(memory_arena *Arena, string_reference String, print_string_options Options = DefaultPrintStringOptions)
 {
+    s32 Padding = Max(0, Options.MinWidth - (s32)String.Length);
+    s32 IsLeftJustify = FlagIsSet(Options.Flags, print_string_flags_LeftJustify);
     size_t Result = 0;
     char *At = String.Memory;
     s32 Remaining = String.Length;
+    if (!IsLeftJustify)
+    {
+        Result += Append(Arena, ' ', Padding);
+    }
     while (Arena->Allocated < Arena->Size && Remaining--)
     {
         ((char*)Arena->Memory)[Arena->Allocated++] = *At++;
+        Result++;
+    }
+    if (IsLeftJustify)
+    {
+        Result += Append(Arena, ' ', Padding);
+    }
+    return Result;
+}
+
+size_t Append(memory_arena *Dest, memory_arena Source)
+{
+    size_t Result = 0;
+    char *At = (char*)Source.Memory;
+    size_t Remaining = Source.Allocated;
+    while (Dest->Allocated < Dest->Size && Remaining--)
+    {
+        ((char*)Dest->Memory)[Dest->Allocated++] = *At++;
         Result++;
     }
     return Result;
@@ -504,7 +547,7 @@ size_t Append(memory_arena *Arena, r64 Real)
     return Append(Arena, RealString);
 }
 
-size_t Append(memory_arena *Arena, s32 Integer)
+size_t Append(memory_arena *Arena, s64 Integer)
 {
     size_t Result = 0;
     if (Integer == 0)
@@ -537,7 +580,17 @@ size_t Append(memory_arena *Arena, s32 Integer)
     return Result;
 }
 
-size_t Append(memory_arena *Arena, u32 Integer)
+size_t Append(memory_arena *Arena, ssize_t Integer)
+{
+    return Append(Arena, (s64)Integer);
+}
+
+size_t Append(memory_arena *Arena, s32 Integer)
+{
+    return Append(Arena, (s64)Integer);
+}
+
+size_t Append(memory_arena *Arena, u64 Integer)
 {
     size_t Result = 0;
     if (Integer == 0)
@@ -563,6 +616,16 @@ size_t Append(memory_arena *Arena, u32 Integer)
         }
     }
     return Result;
+}
+
+size_t Append(memory_arena *Arena, size_t Integer)
+{
+    return Append(Arena, (u64)Integer);
+}
+
+size_t Append(memory_arena *Arena, u32 Integer)
+{
+    return Append(Arena, (u64)Integer);
 }
 
 s32 StringLength(const char *String)
@@ -608,9 +671,15 @@ print_buffer *Append(print_buffer *Buffer, token_type TokenType)
     return Buffer;
 }
 
-print_buffer *Append(print_buffer *Buffer, string_reference String)
+print_buffer *Append(print_buffer *Buffer, string_reference String, print_string_options Options = DefaultPrintStringOptions)
 {
-    Append(&Buffer->Builder, String);
+    Append(&Buffer->Builder, String, Options);
+    return Buffer;
+}
+
+print_buffer *Append(print_buffer *Buffer, memory_arena Arena)
+{
+    Append(&Buffer->Builder, Arena);
     return Buffer;
 }
 
@@ -656,7 +725,31 @@ print_buffer *Tab(print_buffer *Buffer, u32 Count = 1)
     return Buffer;
 }
 
+print_buffer *Append(print_buffer *Buffer, ssize_t Integer)
+{
+    Append(&Buffer->Builder, Integer);
+    return Buffer;
+}
+
+print_buffer *Append(print_buffer *Buffer, s64 Integer)
+{
+    Append(&Buffer->Builder, Integer);
+    return Buffer;
+}
+
 print_buffer *Append(print_buffer *Buffer, s32 Integer)
+{
+    Append(&Buffer->Builder, Integer);
+    return Buffer;
+}
+
+print_buffer *Append(print_buffer *Buffer, size_t Integer)
+{
+    Append(&Buffer->Builder, Integer);
+    return Buffer;
+}
+
+print_buffer *Append(print_buffer *Buffer, u64 Integer)
 {
     Append(&Buffer->Builder, Integer);
     return Buffer;
@@ -907,45 +1000,6 @@ size_t SkipIntralineWhitespace(parser *Parser)
 void SkipToEndOfLine(parser *Parser)
 {
     while (!IsEOF(Parser) && GetChar(Parser) != '\n');
-}
-
-void Panic(const char *Format, ...)
-{
-    va_list args;
-    va_start(args, Format);
-
-    fprintf(stderr, "ERROR: ");
-    vfprintf(stderr, Format, args);
-    fprintf(stderr, "\n");
-
-    va_end(args);
-    exit(1);
-}
-
-void Panic(parser *Parser, const char *Format, ...)
-{
-    va_list args;
-    va_start(args, Format);
-
-    fprintf(stderr, "ERROR: Line %u: ", Parser->SourceLineNumber);
-    vfprintf(stderr, Format, args);
-    fprintf(stderr, "\n");
-
-    va_end(args);
-    exit(1);
-}
-
-void Panic(lexeme *Lexeme, const char *Format, ...)
-{
-    va_list args;
-    va_start(args, Format);
-
-    fprintf(stderr, "ERROR: Line %u: ", Lexeme->LineNumber);
-    vfprintf(stderr, Format, args);
-    fprintf(stderr, "\n");
-
-    va_end(args);
-    exit(1);
 }
 
 void PrintUsageAndExit(program *Program)
@@ -1779,7 +1833,12 @@ lexeme *Statement(parser *Parser)
     lexeme *Command = 0;
     lexeme *Peek = PeekLex(Parser);
 #if DEBUG_STATEMENT
-    printf("%d %.*s\n", LineNumber->Integer, Peek->String.Length, Peek->String.Memory);
+    {
+        PRINT_BUFFER(Buffer, 1024, print_buffer_flags_AppendNewline);
+        Append(&Buffer, LineNumber->Integer);
+        Append(&Buffer, " ");
+        Append(&Buffer, Peek->String);
+    }
 #endif
     switch (Peek->Type)
     {
@@ -2004,7 +2063,10 @@ lexeme *NumberComparison(environment *Environment, lexeme *Operator, lexeme *Out
 
     if (!IsNumber(LHS.Type) || !IsNumber(RHS.Type))
     {
-        Panic(Operator, "Cannot compare types %s and %s", TokenTypeNames[LHS.Type].Memory, TokenTypeNames[RHS.Type].Memory);
+        PANIC_BUFFER_LINE(Panic, 1024, Operator->LineNumber, "Cannot compare types ");
+        Append(&Panic, LHS.Type);
+        Append(&Panic, " and ");
+        Append(&Panic, RHS.Type);
     }
     else if (LHS.Type == token_type_INTEGER && RHS.Type == token_type_INTEGER)
     {
@@ -2028,7 +2090,8 @@ lexeme *NumberComparison(environment *Environment, lexeme *Operator, lexeme *Out
             } break;
             default:
             {
-                Panic(Operator, "No comparison defined for type %s", TokenTypeNames[Operator->Type].Memory);
+                PANIC_BUFFER_LINE(Panic, 1024, Operator->LineNumber, "No comparison defined for type ");
+                Append(&Panic, Operator->Type);
             } break;
         }
     }
@@ -2056,7 +2119,8 @@ lexeme *NumberComparison(environment *Environment, lexeme *Operator, lexeme *Out
             } break;
             default:
             {
-                Panic(Operator, "No comparison defined for type %s", TokenTypeNames[Operator->Type].Memory);
+                PANIC_BUFFER_LINE(Panic, 1024, Operator->LineNumber, "No comparison defined for type ");
+                Append(&Panic, Operator->Type);
             } break;
         }
     }
@@ -2087,7 +2151,9 @@ lexeme *ToBoolean(environment *Environment, lexeme *Value, lexeme *Output)
 #endif
         default:
         {
-            Panic(Value, "Cannot convert %s to boolean", TokenTypeNames[Value->Type].Memory);
+            PANIC_BUFFER_LINE(Panic, 1024, Value->LineNumber, "Cannot convert ");
+            Append(&Panic, Value->Type);
+            Append(&Panic, " to boolean");
         } break;
     }
     *Output = Boolean;
@@ -2135,7 +2201,9 @@ lexeme *ToInteger(environment *Environment, lexeme *Value, lexeme *Output, integ
         } break;
         default:
         {
-            Panic(Value, "Cannot convert %s to integer", TokenTypeNames[Value->Type].Memory);
+            PANIC_BUFFER_LINE(Panic, 1024, Value->LineNumber, "Cannot convert ");
+            Append(&Panic, Value->Type);
+            Append(&Panic, " to integer");
         } break;
     }
     *Output = Integer;
@@ -2243,13 +2311,15 @@ lexeme *EvaluateExpression(environment *Environment, lexeme *Expr, lexeme *Value
                 } break;
                 default:
                 {
-                    Panic(Expr, "Cannot negate %s", TokenTypeNames[Value->Type].Memory);
+                    PANIC_BUFFER_LINE(Panic, 1024, Expr->LineNumber, "Cannot negate ");
+                    Append(&Panic, Value->Type);
                 } break;
             }
         } break;
         default:
         {
-            Panic(Expr, "Cannot evaluate %s", TokenTypeNames[Expr->Type].Memory);
+            PANIC_BUFFER_LINE(Panic, 1024, Expr->LineNumber, "Cannot evaluate ");
+            Append(&Panic, Expr->Type);
         } break;
     }
     return Value;
@@ -2288,7 +2358,9 @@ lexeme *ToString(memory_arena *Arena, lexeme *Value, lexeme *String)
         } break;
         default:
         {
-            Panic(Value, "Cannot convert %s to string", TokenTypeNames[Value->Type].Memory);
+            PANIC_BUFFER_LINE(Panic, 1024, Value->LineNumber, "Cannot convert ");
+            Append(&Panic, Value->Type);
+            Append(&Panic, " to string");
         } break;
     }
     return String;
@@ -2478,7 +2550,7 @@ void DebugExpression(lexeme *Expr)
     Arena.Memory = Memory;
     Arena.Size = sizeof Memory;
     RenderExpression(Expr, &Arena);
-    printf("DEBUG: %.*s\n", (s32)Arena.Allocated, (char *)Arena.Memory);
+    DEBUG(Arena);
 }
 
 void Debug(lexeme *Lexeme)
@@ -2489,19 +2561,19 @@ void Debug(lexeme *Lexeme)
     Arena.Size = sizeof Memory;
     lexeme String;
     ToString(&Arena, Lexeme, &String);
-    printf("DEBUG: %.*s\n", String.String.Length, String.String.Memory);
+    DEBUG(String.String);
 }
 
-void EvaluatePrint(environment *Environment, lexeme *Print)
+void EvaluatePrint(environment *Environment, lexeme *PrintLexeme)
 {
-    lexeme *Args = Print->Left;
+    lexeme *Args = PrintLexeme->Left;
     lexeme *Expr = 0;
     s32 NextPrefixWidth, PrefixWidth;
     char NextPrefix, Prefix;
     Prefix = 0;
     u8 SuppressNewline = 0;
-    s32 PrintCursor = 0;
     u8 IsTab = 0;
+    PRINT_BUFFER(Buffer, 1024, 0);
     while (Args)
     {
         IsTab = SuppressNewline = NextPrefix = 0;
@@ -2546,18 +2618,20 @@ void EvaluatePrint(environment *Environment, lexeme *Print)
             ToString(Environment, &Value, &Value);
             if (Value.Type != token_type_STRING)
             {
-                Panic(&Value, "Cannot print non-string value %s", TokenTypeNames[Value.Type].Memory);
+                PANIC_BUFFER_LINE(Panic, 1024, Value.LineNumber, "Cannot print non-string value ");
+                Append(&Panic, Value.Type);
             }
             if (Prefix)
             {
-                s32 Before = PrintCursor;
-                PrintCursor += printf("%*c", PrefixWidth, Prefix);
+                Append(&Buffer, Prefix, PrefixWidth);
             }
-            PrintCursor += printf("%s%-*.*s", LeftPad, MinWidth, Value.String.Length, Value.String.Memory);
+            Append(&Buffer, LeftPad);
+            Append(&Buffer, Value.String, {MinWidth, print_string_flags_LeftJustify});
             EndTemporaryMemory(&Environment->Parser.StringArena, TemporaryMemory);
         }
         if (IsTab)
         {
+            s32 PrintCursor = Buffer.Builder.Allocated;
             if (56 <= PrintCursor)
             {
                 // TODO
@@ -2572,9 +2646,8 @@ void EvaluatePrint(environment *Environment, lexeme *Print)
     }
     if (!SuppressNewline)
     {
-        printf("\n");
+        Newline(&Buffer);
     }
-    fflush(stdout);
 }
 
 void EvaluateDim(environment *Environment, lexeme *Lexeme)
@@ -2585,7 +2658,11 @@ void EvaluateDim(environment *Environment, lexeme *Lexeme)
     size_t BytesAllocated = AllocateString(&Environment->Parser.StringArena, Value->Integer, &Value->String.Memory);
     if (Value->Integer != BytesAllocated)
     {
-        Panic(Lexeme, "Not enough memory to allocate string; allocated %d of %d bytes", BytesAllocated, Value->Integer);
+        PANIC_BUFFER_LINE(Panic, 1024, Lexeme->LineNumber, "Not enough memory to allocate string; allocated ");
+        Append(&Panic, BytesAllocated);
+        Append(&Panic, " of ");
+        Append(&Panic, Value->Integer);
+        Append(&Panic, " bytes");
     }
 }
 
@@ -2602,11 +2679,13 @@ s32 StringInput(environment *Environment, lexeme *Id, r32 AllowedSeconds = -1, l
     lexeme *Variable = FindVariable(Environment, Id);
     if (!Variable)
     {
-        Panic(Id, "Attempted to INPUT an unDIM'd string %.*s", Id->String.Length, Id->String.Memory);
+        PANIC_BUFFER_LINE(Panic, 1024, Id->LineNumber, "Attempted to INPUT an unDIM'd string ");
+        Append(&Panic, Id->String);
     }
     if (!Id->IsString || !Variable->IsString)
     {
-        Panic(Id, "Cannot store string in non-string variable %.*s", Id->String.Length, Id->String.Memory);
+        PANIC_BUFFER_LINE(Panic, 1024, Id->LineNumber, "Cannot store string in non-string variable ");
+        Append(&Panic, Id->String);
     }
     s32 Char = 0;
     buffer Buffer = NewBuffer(Variable->String.Memory, Variable->Integer);
@@ -2666,7 +2745,13 @@ s32 StringInput(environment *Environment, lexeme *Id, r32 AllowedSeconds = -1, l
     s32 Length = Buffer.At - Buffer.Contents;
     Variable->String.Length = Length;
 #if DEBUG_STRING_INPUT
-    printf("(%d)%.*s\n", Variable->String.Length, Variable->String.Length, Variable->String.Memory);
+    {
+        PRINT_BUFFER(Buffer, 1024, print_buffer_flags_AppendNewline);
+        Append(&Buffer, '(');
+        Append(&Buffer, Variable->String.Length);
+        Append(&Buffer, ')');
+        Append(&Buffer, Variable->String);
+    }
 #endif
     return Length;
 }
@@ -2677,8 +2762,15 @@ void EvaluateInput(environment *Environment, lexeme *Lexeme)
     s32 Again = 0;
     do
     {
-        printf("?%s", Again ? "?" : "");
-        fflush(stdout);
+        if (Again)
+        {
+            PRINT("??");
+        }
+        else
+        {
+            PRINT("?");
+        }
+        
         if (Lexeme->IsString)
         {
             Again = !StringInput(Environment, Lexeme);
@@ -2707,11 +2799,11 @@ void EvaluateInput(environment *Environment, lexeme *Lexeme)
             }
             if (Again && Multiplier < 0)
             {
-                printf("BAD INPUT, RETYPE FROM ITEM 1\n");
+                PRINT("BAD INPUT, RETYPE FROM ITEM 1\n");
             }
             else if (Char != '\n')
             {
-                printf("EXTRA INPUT - WARNING ONLY\n");
+                PRINT("EXTRA INPUT - WARNING ONLY\n");
             }
             while (Char != '\n')
             {
@@ -2764,7 +2856,7 @@ void EvaluateEnter(environment *Environment, lexeme *Lexeme)
         ToInteger(Environment, EvaluateExpression(Environment, Expr, &Value), &Value, integer_cast_method_Round);
         if (255 < Value.Integer || Value.Integer < 1)
         {
-            Panic(Expr, "The allotted time must be between 1 and 255");
+            PANIC_LINE(Expr->LineNumber, "The allotted time must be between 1 and 255");
         }
 
         Variable = LookupOrDeclareVariable(Environment, Id);
@@ -2783,14 +2875,19 @@ void EvaluateGoto(environment *Environment, lexeme *Lexeme)
         s32 ChoiceIndex = Choice.Integer;
         if (ChoiceIndex < 1)
         {
-            Panic(Lexeme, "Cannot GOTO/OF with branch choice %d", ChoiceIndex);
+            PANIC_BUFFER_LINE(Panic, 1024, Lexeme->LineNumber, "Cannot GOTO/OF with branch choice ");
+            Append(&Panic, ChoiceIndex);
         }
         while (ChoiceIndex)
         {
             Goto = Goto->Right;
             if (!Goto)
             {
-                Panic(Lexeme, "Cannot GOTO/OF with branch choice %d with only %d choice(s)", Choice.Integer, Choice.Integer - ChoiceIndex);
+                PANIC_BUFFER_LINE(Panic, 1024, Lexeme->LineNumber, "Cannot GOTO/OF with branch choice ");
+                Append(&Panic, Choice.Integer);
+                Append(&Panic, " with only ");
+                Append(&Panic, Choice.Integer - ChoiceIndex);
+                Append(&Panic, " choice(s)");
             }
             ChoiceIndex--;
         }
@@ -2802,7 +2899,7 @@ void PushStack(environment *Environment, lexeme *Return)
 {
     if (ArrayCount(Environment->Stack) <= Environment->StackLength)
     {
-        Panic(Return, "Stack overflow");
+        PANIC_LINE(Return->LineNumber, "Stack overflow");
     }
     Environment->Stack[Environment->StackLength++] = {Return};
 }
@@ -2811,7 +2908,7 @@ lexeme *PopStack(environment *Environment, lexeme *Return)
 {
     if (!Environment->StackLength)
     {
-        Panic(Return, "Stack underflow");
+        PANIC_LINE(Return->LineNumber, "Stack underflow");
     }
     return Environment->Stack[--Environment->StackLength].Lexeme;
 }
@@ -2875,7 +2972,7 @@ void EvaluateRead(environment *Environment, lexeme *Lexeme)
 {
     if (Environment->DataCount <= Environment->DataPosition)
     {
-        Panic(Lexeme, "Read past the end of the data values");
+        PANIC_LINE(Lexeme->LineNumber, "Read past the end of the data values");
     }
     lexeme *Id = Lexeme->Left;
     lexeme *Variable = LookupOrDeclareVariable(Environment, Id);
@@ -2895,7 +2992,7 @@ void Evaluate(environment *Environment, lexeme *Lexeme)
         {
             if (sizeof Environment->DataEntries <= Environment->DataCount)
             {
-                Panic(Lexeme, "Too many data entries");
+                PANIC_LINE(Lexeme->LineNumber, "Too many data entries");
             }
             Environment->DataEntries[Environment->DataCount++] = Integer->Integer;
             Integer = Integer->Right;
@@ -2905,7 +3002,8 @@ void Evaluate(environment *Environment, lexeme *Lexeme)
     while (Lexeme && Running)
     {
 #if DEBUG_EVALUATE_STATEMENT
-        printf("%s\n", TokenTypeNames[Lexeme->Type].Memory);
+        PRINT_BUFFER(Buffer, 1024, print_buffer_flags_AppendNewline);
+        Append(&Buffer, Lexeme->Type);
 #endif
         Environment->Goto = 0;
         switch (Lexeme->Type)
@@ -2964,7 +3062,8 @@ void Evaluate(environment *Environment, lexeme *Lexeme)
             } break;
             default:
             {
-                Panic(Lexeme, "Can't evaluate %s", TokenTypeNames[Lexeme->Type].Memory);
+                PANIC_BUFFER_LINE(Panic, 1024, Lexeme->LineNumber, "Can't evaluate ");
+                Append(&Panic, Lexeme->Type);
             } break;
         }
         if (Environment->Goto)
@@ -3037,7 +3136,8 @@ int main(int ArgCount, char *Args[])
     int Executable = Open(Program.ExecutablePath, O_RDONLY);
     if (Executable < 0)
     {
-        Panic("Cannot open executable file %s", Program.ExecutablePath);
+        PANIC_BUFFER(Panic, 1024, "Cannot open executable file ");
+        Append(&Panic, Program.ExecutablePath);
     }
 
     Program.ExecutableFileSize = Seek(Executable, 0, SEEK_END);
@@ -3069,13 +3169,14 @@ int main(int ArgCount, char *Args[])
                 }
                 else
                 {
-                    Panic("CBAS Data offset is larger than the footer offset.");
+                    PANIC("CBAS Data offset is larger than the footer offset.");
                 }
             } break;
 
             default:
             {
-                Panic("Invalid CBAS version %u.", CbasFooter.Version);
+                PANIC_BUFFER(Panic, 1024, "Invalid CBAS version ");
+                Append(&Panic, CbasFooter.Version);
             } break;
         }
     }
@@ -3149,7 +3250,8 @@ int main(int ArgCount, char *Args[])
         int SourceCodeFile = Open(Program.SourcePath, O_RDONLY);
         if (SourceCodeFile < 0)
         {
-            Panic("Cannot open source code file %s", Program.SourcePath);
+            PANIC_BUFFER(Panic, 1024, "Cannot open source code file ");
+            Append(&Panic, Program.SourcePath);
         }
 
         if (Program.CreateExecutable)
@@ -3180,7 +3282,9 @@ int main(int ArgCount, char *Args[])
             int NewExecutable = Create(NewExecutablePath, 0);
             if (NewExecutable < 0)
             {
-                Panic("Cannot open file %s for writing", NewExecutablePath);
+                PANIC_BUFFER(Panic, 1024, "Cannot open file ");
+                Append(&Panic, NewExecutable);
+                Append(&Panic, " for writing");
             }
 
             u8 Buffer[1024*1024];
