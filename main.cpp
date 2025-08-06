@@ -1,4 +1,4 @@
-#include <math.h>
+#include "math.cpp"
 #include <time.h>
 
 
@@ -1977,7 +1977,7 @@ lexeme *NumberOperation(environment *Environment, lexeme *Operator, lexeme *Outp
             case token_type_CARET:
             {
                 Output->Type = token_type_REAL;
-                Output->Real = pow((r32)LHS.Integer, (r32)RHS.Integer);
+                Output->Real = Power((r64)LHS.Integer, (r64)RHS.Integer);
             } break;
             default:
             {
@@ -2011,7 +2011,7 @@ lexeme *NumberOperation(environment *Environment, lexeme *Operator, lexeme *Outp
             } break;
             case token_type_CARET:
             {
-                Output->Real = pow(LHSReal, RHSReal);
+                Output->Real = Power(LHSReal, RHSReal);
             } break;
             default:
             {

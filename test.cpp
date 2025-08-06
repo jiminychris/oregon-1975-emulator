@@ -312,20 +312,20 @@ int Test(environment *Environment)
     EXPRESSION_TEST(Failures, Environment, "1+2*3+4", "((1+(2*3))+4)", 1+2*3+4);
     EXPRESSION_TEST(Failures, Environment, "1*2+3*4", "((1*2)+(3*4))", 1*2+3*4);
     EXPRESSION_TEST(Failures, Environment, "1*2=3*4", "((1*2)=(3*4))", 1*2==3*4);
-    EXPRESSION_TEST(Failures, Environment, "4^3^2", "(4^(3^2))", pow(4, pow(3, 2)));
+    EXPRESSION_TEST(Failures, Environment, "4^3^2", "(4^(3^2))", Power(4, Power(3, 2)));
     EXPRESSION_TEST(Failures, Environment, "2-1", "(2-1)", 2-1);
     EXPRESSION_TEST(Failures, Environment, "1-2", "(1-2)", 1-2);
     EXPRESSION_TEST(Failures, Environment, "-1", "(-1)", -1);
     EXPRESSION_TEST(Failures, Environment, "--1", "(-(-1))", -(-1));
-    EXPRESSION_TEST(Failures, Environment, "-3^2", "(-(3^2))", -pow(3, 2));
+    EXPRESSION_TEST(Failures, Environment, "-3^2", "(-(3^2))", -Power(3, 2));
     EXPRESSION_TEST(Failures, Environment, "1+2*3", "(1+(2*3))", 1+2*3);
     EXPRESSION_TEST(Failures, Environment, "(1+2)*3", "((1+2)*3)", (1+2)*3);
     EXPRESSION_TEST(Failures, Environment, "0.5*10", "(0.5*10)", 0.5*10);
-    EXPRESSION_TEST(Failures, Environment, "(20/100-4)^2+72", "((((20/100)-4)^2)+72)", pow(20.0f/100-4,2)+72);
-    EXPRESSION_TEST(Failures, Environment, "(20/100-4)^2+12", "((((20/100)-4)^2)+12)", pow(20.0f/100-4,2)+12);
-    EXPRESSION_TEST(Failures, Environment, "((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1)", (pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
-    EXPRESSION_TEST(Failures, Environment, "0.5*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.5*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.5*10>(pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
-    EXPRESSION_TEST(Failures, Environment, "0.3*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.3*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.3*10>(pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
-    EXPRESSION_TEST(Failures, Environment, "0.2*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.2*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.2*10>(pow(20.0f/100-4,2)+72)/(pow(20.0f/100-4,2)+12)-1);
+    EXPRESSION_TEST(Failures, Environment, "(20/100-4)^2+72", "((((20/100)-4)^2)+72)", Power(20.0f/100-4,2)+72);
+    EXPRESSION_TEST(Failures, Environment, "(20/100-4)^2+12", "((((20/100)-4)^2)+12)", Power(20.0f/100-4,2)+12);
+    EXPRESSION_TEST(Failures, Environment, "((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1)", (Power(20.0f/100-4,2)+72)/(Power(20.0f/100-4,2)+12)-1);
+    EXPRESSION_TEST(Failures, Environment, "0.5*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.5*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.5*10>(Power(20.0f/100-4,2)+72)/(Power(20.0f/100-4,2)+12)-1);
+    EXPRESSION_TEST(Failures, Environment, "0.3*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.3*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.3*10>(Power(20.0f/100-4,2)+72)/(Power(20.0f/100-4,2)+12)-1);
+    EXPRESSION_TEST(Failures, Environment, "0.2*10>((20/100-4)^2+72)/((20/100-4)^2+12)-1", "((0.2*10)>((((((20/100)-4)^2)+72)/((((20/100)-4)^2)+12))-1))", 0.2*10>(Power(20.0f/100-4,2)+72)/(Power(20.0f/100-4,2)+12)-1);
     return Failures;
 }
