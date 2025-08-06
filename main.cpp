@@ -3178,7 +3178,6 @@ int main(int ArgCount, char *Args[])
         PANIC_BUFFER(Panic, 1024, "Cannot open executable file ");
         Append(&Panic, Program.ExecutablePath);
     }
-
     Program.ExecutableFileSize = Seek(Executable, 0, SEEK_END);
     cbas_footer CbasFooter;
     magic_number CbasMagicNumber = {.String = {'C','B','A','S'}};
@@ -3322,7 +3321,7 @@ int main(int ArgCount, char *Args[])
             if (NewExecutable < 0)
             {
                 PANIC_BUFFER(Panic, 1024, "Cannot open file ");
-                Append(&Panic, NewExecutable);
+                Append(&Panic, NewExecutablePath);
                 Append(&Panic, " for writing");
             }
 
@@ -3346,7 +3345,7 @@ int main(int ArgCount, char *Args[])
             CbasFooter.DataOffset = Program.DataOffset;
 
             Write(NewExecutable, &CbasFooter, sizeof CbasFooter);
-            ChangeMode(NewExecutable, 0755);
+            int ChangeModeError = ChangeMode(NewExecutable, 0755);
             Close(NewExecutable);
             return 0;
         }
