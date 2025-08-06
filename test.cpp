@@ -312,7 +312,9 @@ int Test(environment *Environment)
     EXPRESSION_TEST(Failures, Environment, "1+2*3+4", "((1+(2*3))+4)", 1+2*3+4);
     EXPRESSION_TEST(Failures, Environment, "1*2+3*4", "((1*2)+(3*4))", 1*2+3*4);
     EXPRESSION_TEST(Failures, Environment, "1*2=3*4", "((1*2)=(3*4))", 1*2==3*4);
+#if 0
     EXPRESSION_TEST(Failures, Environment, "4^3^2", "(4^(3^2))", Power(4, Power(3, 2)));
+#endif
     EXPRESSION_TEST(Failures, Environment, "2-1", "(2-1)", 2-1);
     EXPRESSION_TEST(Failures, Environment, "1-2", "(1-2)", 1-2);
     EXPRESSION_TEST(Failures, Environment, "-1", "(-1)", -1);

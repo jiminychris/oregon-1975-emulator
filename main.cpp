@@ -1,4 +1,5 @@
 #include "math.cpp"
+#include <math.h>
 #include <time.h>
 
 
@@ -1977,7 +1978,7 @@ lexeme *NumberOperation(environment *Environment, lexeme *Operator, lexeme *Outp
             case token_type_CARET:
             {
                 Output->Type = token_type_REAL;
-                Output->Real = Power((r64)LHS.Integer, (r64)RHS.Integer);
+                Output->Real = Power((r32)LHS.Integer, RHS.Integer);
             } break;
             default:
             {
@@ -2011,7 +2012,15 @@ lexeme *NumberOperation(environment *Environment, lexeme *Operator, lexeme *Outp
             } break;
             case token_type_CARET:
             {
-                Output->Real = Power(LHSReal, RHSReal);
+                if (RHS.Type != token_type_INTEGER)
+                {
+                    PANIC_BUFFER_LINE(Panic, 1024, Operator->LineNumber, "Non-integer exponentiation is not supported (");
+                    Append(&Panic, LHSReal);
+                    Append(&Panic, '^');
+                    Append(&Panic, RHS.Real);
+                    Append(&Panic, ')');
+                }
+                Output->Real = Power(LHSReal, RHS.Integer);
             } break;
             default:
             {
