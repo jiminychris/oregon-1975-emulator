@@ -1,25 +1,30 @@
-#include "basic_apple_silicon_platform.cpp"
+#include <stddef.h>
 #include "primitives.h"
 
-void *memcpy(void *dest, const void *src, size_t count)
-{
-    u8 *Dest = (u8*)dest;
-    u8 *Source = (u8*)src;
-    while (count--)
+extern "C" {
+    void *memcpy(void *dest, const void *src, size_t count)
     {
-        *Dest++ = *Source++;
+        u8 *Dest = (u8*)dest;
+        u8 *Source = (u8*)src;
+        while (count--)
+        {
+            *Dest++ = *Source++;
+        }
+        return dest;
     }
-    return dest;
+
+    void *memset(void *dest, int ch, size_t count)
+    {
+        u8 *Dest = (u8*)dest;
+        while (count--)
+        {
+            *Dest++ = ch;
+        }
+        return dest;
+    }
 }
 
-void *memset(void *dest, int ch, size_t count)
-{
-    u8 *Dest = (u8*)dest;
-    while (count--)
-    {
-        *Dest++ = ch;
-    }
-    return dest;
-}
+#include "basic_apple_silicon_platform.cpp"
+#include "common.cpp"
 
 #include "main.cpp"

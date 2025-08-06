@@ -533,18 +533,57 @@ size_t Append(memory_arena *Arena, buffer Buffer)
     return Append(Arena, StringReference(Buffer));
 }
 
-size_t Append(memory_arena *Arena, r32 Real)
+union r64_bits
 {
-    char RealString[256];
-    snprintf(RealString, sizeof RealString, "%g", Real);
-    return Append(Arena, RealString);
-}
+    r64 Double;
+    u64 Integer;
+};
 
 size_t Append(memory_arena *Arena, r64 Real)
 {
-    char RealString[256];
-    snprintf(RealString, sizeof RealString, "%g", Real);
-    return Append(Arena, RealString);
+    size_t Result = 0;
+#if 0
+
+    r64_bits Bits;
+    Bits.Double = Real;
+
+    u64 Sign =     (Bits.Integer & 0x8000000000000000);
+    s16 Exponent = ((Bits.Integer >> 52) & 0x07FF);
+    s64 Fraction = (Bits.Integer & 0x000FFFFFFFFFFFFF);
+    if (Sign)
+    {
+        Result += Append(Arena, '-');
+    }
+    if (Exponent == 0)
+    {
+        Result += Append(Arena, '0');
+    }
+    else if (Exponent == 0x7ff)
+    {
+        if (Fraction == 0)
+        {
+            Result += Append(Arena, "inf");
+        }
+        else
+        {
+            Result += Append(Arena, "nan");
+        }
+    }
+    else
+    {
+//        Exponent - 2023
+    }
+#else
+    size_t Size = Arena->Size - Arena->Allocated;
+    Result = Min(Size, (size_t)snprintf((char*)Arena->Memory + Arena->Allocated, Size, "%g", Real));
+    Arena->Allocated += Result;
+#endif
+    return Result;
+}
+
+size_t Append(memory_arena *Arena, r32 Real)
+{
+    return Append(Arena, (r64)Real);
 }
 
 size_t Append(memory_arena *Arena, s64 Integer)

@@ -13,75 +13,74 @@ string_reference ParseTest(environment *Environment, string_reference Expression
     return Actual;
 }
 
-string_builder *AppendExpectingHeader(string_builder *Builder, string_reference Expected)
+print_buffer *AppendExpectingHeader(print_buffer *Buffer, string_reference Expected)
 {
-    Append(Builder, "Expecting: ");
-    Append(Builder, Expected);
-    Append(Builder, '=');
-    return Builder;
+    Append(Buffer, "Expecting: ");
+    Append(Buffer, Expected);
+    Append(Buffer, '=');
+    return Buffer;
 }
 
-string_builder *AppendExpectingFooter(string_builder *Builder)
+print_buffer *AppendExpectingFooter(print_buffer *Buffer)
 {
-    Append(Builder, " . . . ");
-    return Builder;
+    Append(Buffer, " . . . ");
+    return Buffer;
 }
 
-string_builder *AppendPass(string_builder *Builder)
+print_buffer *AppendPass(print_buffer *Buffer)
 {
-    Append(Builder, "\033[32mPASS\033[0m");
-    Newline(Builder);
-    return Builder;
+    Append(Buffer, "\033[32mPASS\033[0m");
+    Newline(Buffer);
+    return Buffer;
 }
 
-string_builder *AppendFailHeader(string_builder *Builder, string_reference Actual)
+print_buffer *AppendFailHeader(print_buffer *Buffer, string_reference Actual)
 {
-    Append(Builder, "\033[31mFAIL");
-    Newline(Builder);
-    Append(Builder, "Actual:    ");
-    Append(Builder, Actual);
-    Append(Builder, '=');
-    return Builder;
+    Append(Buffer, "\033[31mFAIL");
+    Newline(Buffer);
+    Append(Buffer, "Actual:    ");
+    Append(Buffer, Actual);
+    Append(Buffer, '=');
+    return Buffer;
 }
 
-string_builder *AppendFailFooter(string_builder *Builder)
+print_buffer *AppendFailFooter(print_buffer *Buffer)
 {
-    Append(Builder, "\033[0m");
-    Newline(Builder);
-    return Builder;
+    Append(Buffer, "\033[0m");
+    Newline(Buffer);
+    return Buffer;
 }
 
-#define APPEND_EXPECTING(Builder, Expected, ExpectedValue) {    \
-        AppendExpectingHeader(Builder, Expected);               \
-        Append(Builder, ExpectedValue);                         \
-        AppendExpectingFooter(Builder);                         \
+#define APPEND_EXPECTING(Buffer, Expected, ExpectedValue) {    \
+        AppendExpectingHeader(Buffer, Expected);               \
+        Append(Buffer, ExpectedValue);                         \
+        AppendExpectingFooter(Buffer);                         \
     }
 
-#define APPEND_FAIL(Builder, Actual, ActualValue) { \
-        AppendFailHeader(Builder, Actual);          \
-        Append(Builder, ActualValue);               \
-        AppendFailFooter(Builder);                  \
+#define APPEND_FAIL(Buffer, Actual, ActualValue) { \
+        AppendFailHeader(Buffer, Actual);          \
+        Append(Buffer, ActualValue);               \
+        AppendFailFooter(Buffer);                  \
     }
 
 int ExpressionTest(environment *Environment, string_reference ExpressionString, string_reference Expected, s32 ExpectedValue)
 {
     lexeme Value;
-    STRING_BUILDER(Builder, 1024);
+    PRINT_BUFFER(Buffer, 1024, 0);
     string_reference Actual = ParseTest(Environment, ExpressionString, &Value);
     int Success = Equals(Expected, Actual) && (Value.Type == token_type_BOOLEAN || Value.Type == token_type_INTEGER) && Value.Integer == ExpectedValue;
     if (Success)
     {
 #if PRINT_SUCCESSFUL_TESTS
-        APPEND_EXPECTING(&Builder, Expected, ExpectedValue);
-        AppendPass(&Builder);
+        APPEND_EXPECTING(&Buffer, Expected, ExpectedValue);
+        AppendPass(&Buffer);
 #endif
     }
     else
     {
-        APPEND_EXPECTING(&Builder, Expected, ExpectedValue);
-        APPEND_FAIL(&Builder, Actual, Value.Integer);
+        APPEND_EXPECTING(&Buffer, Expected, ExpectedValue);
+        APPEND_FAIL(&Buffer, Actual, Value.Integer);
     }
-    Print(&Builder);
     return !Success;
 }
 
@@ -92,32 +91,53 @@ int AboutEqual(r32 A, r32 B)
     return fabs(A - B) < EPSILON;
 }
 
+int AppendTest(string_reference Expected, r64 Value)
+{
+    PRINT_BUFFER(Buffer, 1024, 0);
+    STRING_BUILDER(Builder, 1024);
+    Append(&Builder, Value);
+    int Success = Equals(StringReference(&Builder), Expected);
+    if (Success)
+    {
+#if PRINT_SUCCESSFUL_TESTS
+        APPEND_EXPECTING(&Buffer, Expected, Value);
+        AppendPass(&Buffer);
+#endif
+    }
+    else
+    {
+        APPEND_EXPECTING(&Buffer, Expected, Value);
+        Append(&Buffer, "\033[31mFAIL\033[0m");
+        Newline(&Buffer);
+    }
+    return !Success;
+}
+
 int ExpressionTest(environment *Environment, string_reference ExpressionString, string_reference Expected, r64 ExpectedValue)
 {
     lexeme Value;
-    STRING_BUILDER(Builder, 1024);
+    PRINT_BUFFER(Buffer, 1024, 0);
     string_reference Actual = ParseTest(Environment, ExpressionString, &Value);
     int Success = Equals(Expected, Actual) && Value.Type == token_type_REAL && AboutEqual(Value.Real, ExpectedValue);
     if (Success)
     {
 #if PRINT_SUCCESSFUL_TESTS
-        APPEND_EXPECTING(&Builder, Expected, ExpectedValue);
-        AppendPass(&Builder);
+        APPEND_EXPECTING(&Buffer, Expected, ExpectedValue);
+        AppendPass(&Buffer);
 #endif
     }
     else
     {
-        APPEND_EXPECTING(&Builder, Expected, ExpectedValue);
-        APPEND_FAIL(&Builder, Actual, Value.Real);
+        APPEND_EXPECTING(&Buffer, Expected, ExpectedValue);
+        APPEND_FAIL(&Buffer, Actual, Value.Real);
     }
-    Print(&Builder);
     return !Success;
 }
 
 int ExpressionTest(environment *Environment, string_reference ExpressionString, string_reference Expected, char ExpectedValue)
 {
     lexeme Value;
-    STRING_BUILDER(Builder, 1024);
+    PRINT_BUFFER(Buffer, 1024, 0);
     STRING_BUILDER(ExpectedValueBuilder, 1024);
     RenderString({1, &ExpectedValue}, &ExpectedValueBuilder);
     string_reference ExpectedValueString = StringReference(&ExpectedValueBuilder);
@@ -127,22 +147,21 @@ int ExpressionTest(environment *Environment, string_reference ExpressionString, 
     if (Success)
     {
 #if PRINT_SUCCESSFUL_TESTS
-        APPEND_EXPECTING(&Builder, Expected, ExpectedValueString);
-        AppendPass(&Builder);
+        APPEND_EXPECTING(&Buffer, Expected, ExpectedValueString);
+        AppendPass(&Buffer);
 #endif
     }
     else
     {
-        APPEND_EXPECTING(&Builder, Expected, ExpectedValue);
-        APPEND_FAIL(&Builder, Actual, Value.Character);
+        APPEND_EXPECTING(&Buffer, Expected, ExpectedValue);
+        APPEND_FAIL(&Buffer, Actual, Value.Character);
     }
-    Print(&Builder);
     return !Success;
 }
 
 int ExpressionTest(environment *Environment, string_reference ExpressionString, string_reference Expected, const char *ExpectedValue)
 {
-    STRING_BUILDER(Builder, 1024);
+    PRINT_BUFFER(Buffer, 1024, 0);
     STRING_BUILDER(ExpectedValueBuilder, 1024);
     RenderString(StringReference(ExpectedValue), &ExpectedValueBuilder);
     string_reference ExpectedValueString = StringReference(&ExpectedValueBuilder);
@@ -153,107 +172,113 @@ int ExpressionTest(environment *Environment, string_reference ExpressionString, 
     if (Success)
     {
 #if PRINT_SUCCESSFUL_TESTS
-        APPEND_EXPECTING(&Builder, Expected, ExpectedValueString);
-        AppendPass(&Builder);
+        APPEND_EXPECTING(&Buffer, Expected, ExpectedValueString);
+        AppendPass(&Buffer);
 #endif
     }
     else
     {
-        APPEND_EXPECTING(&Builder, Expected, ExpectedValue);
-        APPEND_FAIL(&Builder, Actual, Value.String);
+        APPEND_EXPECTING(&Buffer, Expected, ExpectedValue);
+        APPEND_FAIL(&Buffer, Actual, Value.String);
     }
-    Print(&Builder);
     return !Success;
 }
 
-string_builder *AppendWrappedString(string_builder *Builder, const char *String)
+print_buffer *AppendWrappedString(print_buffer *Buffer, const char *String)
 {
-    Append(Builder, '"');
-    Append(Builder, String);
-    Append(Builder, '"');
-    return Builder;
+    Append(Buffer, '"');
+    Append(Buffer, String);
+    Append(Buffer, '"');
+    return Buffer;
 }
 
-#define APPEND_WRAPPED_STRING(Builder, Type, String)   \
-    Append(Builder, Type);                            \
-    Append(Builder, "(\"");                             \
-    Append(Builder, String);                                            \
-    Append(Builder, "\")");                                               \
-    return Builder
-string_builder *AppendWrappedString(string_builder *Builder, string_reference String)
+#define APPEND_WRAPPED_STRING(Buffer, Type, String)   \
+    Append(Buffer, Type);                            \
+    Append(Buffer, "(\"");                             \
+    Append(Buffer, String);                                            \
+    Append(Buffer, "\")");                                               \
+    return Buffer
+print_buffer *AppendWrappedString(print_buffer *Buffer, string_reference String)
 {
-    APPEND_WRAPPED_STRING(Builder, "STRING_REFERENCE", String);
+    APPEND_WRAPPED_STRING(Buffer, "STRING_REFERENCE", String);
 }
 
-string_builder *AppendWrappedString(string_builder *Builder, buffer String)
+print_buffer *AppendWrappedString(print_buffer *Buffer, buffer String)
 {
-    APPEND_WRAPPED_STRING(Builder, "BUFFER", String);
+    APPEND_WRAPPED_STRING(Buffer, "BUFFER", String);
 }
 
 #define ExpectEquals(Failures, A, B) {                              \
-        STRING_BUILDER(Builder, 1024);                               \
+        PRINT_BUFFER(Buffer, 1024, 0);                                \
         u8 Success = Equals(A, B);                                  \
         if (Success)                                                \
         {                                                           \
             if(PRINT_SUCCESSFUL_TESTS)                              \
             {                                                       \
-                Append(&Builder, "Expecting: ");                  \
-                AppendWrappedString(&Builder, A);                                \
-                Append(&Builder, " = ");                        \
-                AppendWrappedString(&Builder, B);                                \
-                Append(&Builder, " . . . ");                      \
-                AppendPass(&Builder);                               \
+                Append(&Buffer, "Expecting: ");                  \
+                AppendWrappedString(&Buffer, A);                                \
+                Append(&Buffer, " = ");                        \
+                AppendWrappedString(&Buffer, B);                                \
+                Append(&Buffer, " . . . ");                      \
+                AppendPass(&Buffer);                               \
             }                                                       \
         }                                                           \
         else                                                        \
         {                                                           \
-            Append(&Builder, "Expecting: ");                      \
-            AppendWrappedString(&Builder, A);                                    \
-            Append(&Builder, " = ");                            \
-            AppendWrappedString(&Builder, B);                                    \
-            Append(&Builder, " . . . ");                          \
-            Append(&Builder, "\033[31mFAIL\033[0m");                \
-            Newline(&Builder);                                      \
+            Append(&Buffer, "Expecting: ");                      \
+            AppendWrappedString(&Buffer, A);                                    \
+            Append(&Buffer, " = ");                            \
+            AppendWrappedString(&Buffer, B);                                    \
+            Append(&Buffer, " . . . ");                          \
+            Append(&Buffer, "\033[31mFAIL\033[0m");                \
+            Newline(&Buffer);                                      \
         }                                                           \
-        Print(&Builder);                                            \
         Failures += !Success;                                       \
     }
 
 #define ExpectNotEquals(Failures, A, B) {       \
-        STRING_BUILDER(Builder, 1024);          \
+        PRINT_BUFFER(Buffer, 1024, 0);             \
         u8 Success = !Equals(A, B);              \
         if (Success)                            \
         {                                           \
             if(PRINT_SUCCESSFUL_TESTS)                              \
             {                                                       \
-                Append(&Builder, "Expecting: ");                  \
-                AppendWrappedString(&Builder, A);                                \
-                Append(&Builder, " != ");                        \
-                AppendWrappedString(&Builder, B);                                \
-                Append(&Builder, " . . . ");                      \
-                AppendPass(&Builder);                               \
+                Append(&Buffer, "Expecting: ");                  \
+                AppendWrappedString(&Buffer, A);                                \
+                Append(&Buffer, " != ");                        \
+                AppendWrappedString(&Buffer, B);                                \
+                Append(&Buffer, " . . . ");                      \
+                AppendPass(&Buffer);                               \
             }                                                       \
         }                                                           \
         else                                                        \
         {                                                           \
-            Append(&Builder, "Expecting: ");                      \
-            AppendWrappedString(&Builder, A);                                    \
-            Append(&Builder, " != ");                           \
-            AppendWrappedString(&Builder, B);                                    \
-            Append(&Builder, " . . . ");                          \
-            Append(&Builder, "\033[31mFAIL\033[0m");                \
-            Newline(&Builder);                                      \
+            Append(&Buffer, "Expecting: ");                      \
+            AppendWrappedString(&Buffer, A);                                    \
+            Append(&Buffer, " != ");                           \
+            AppendWrappedString(&Buffer, B);                                    \
+            Append(&Buffer, " . . . ");                          \
+            Append(&Buffer, "\033[31mFAIL\033[0m");                \
+            Newline(&Buffer);                                      \
         }                                                           \
-        Print(&Builder);                                            \
         Failures += !Success;                                       \
     }
 
+#define APPEND_TEST(Failures, Expected, Value) Failures += AppendTest(STRING_REFERENCE(Expected), Value)
 #define EXPRESSION_TEST(Failures, Environment, ExpressionString, ExpectedString, ExpectedValue) Failures += ExpressionTest(Environment, STRING_REFERENCE(ExpressionString), STRING_REFERENCE(ExpectedString), ExpectedValue)
 #define STRING_TEST(Failures, T, A, B) T(Failures, A, B); T(Failures, STRING_REFERENCE(A), B); T(Failures, STRING_REFERENCE(A), STRING_REFERENCE(B)); T(Failures, BUFFER(A), B);
 
 int Test(environment *Environment)
 {
     int Failures = 0;
+    APPEND_TEST(Failures, "nan", NAN);
+    APPEND_TEST(Failures, "nan", -NAN);
+    APPEND_TEST(Failures, "inf", INFINITY);
+    APPEND_TEST(Failures, "-inf", -INFINITY);
+    APPEND_TEST(Failures, "0", 0.0);
+    APPEND_TEST(Failures, "-0", -0.0);
+    APPEND_TEST(Failures, "-1", -1.0);
+    APPEND_TEST(Failures, "1", 1.0);
     STRING_TEST(Failures, ExpectEquals, "Foo", "Foo");
     STRING_TEST(Failures, ExpectNotEquals, "", "Foo");
     STRING_TEST(Failures, ExpectNotEquals, "Foo", "");
