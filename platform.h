@@ -1,0 +1,10 @@
+void Exit(int rval);
+ssize_t Read(int fildes, void *buf, size_t nbyte);
+ssize_t Write(int fildes, const void *buf, size_t nbyte);
+int Open(const char *pathname, int flags, mode_t mode = 0);
+int Close(int fd);
+int InputOutputControl(int fd, int request, size_t arg);
+int FileControl(int fd, int op, size_t arg = 0);
+int ChangeMode(int fd, mode_t mode);
+off_t Seek(int fd, off_t offset, int whence);
+int Poll(struct pollfd fds[], size_t nfds, int timeout);

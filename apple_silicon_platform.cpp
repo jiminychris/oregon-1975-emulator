@@ -1,5 +1,4 @@
 #include <fcntl.h>
-#include <unistd.h>
 #include <poll.h>
 
 #define STR_HELPER(X) #X
@@ -72,7 +71,7 @@ ssize_t Write(int fildes, const void *buf, size_t nbyte)
     return Result;
 }
 
-int Open(const char *pathname, int flags, mode_t mode = 0)
+int Open(const char *pathname, int flags, mode_t mode)
 {
     SYSCALL_3(Result, SYSCALL_OPEN, pathname, flags, mode);
     return Result <= STDERR_FILENO ? -1 : Result;
@@ -90,7 +89,7 @@ int InputOutputControl(int fd, int request, size_t arg)
     return Result;
 }
 
-int FileControl(int fd, int op, size_t arg = 0)
+int FileControl(int fd, int op, size_t arg)
 {
     SYSCALL_3(Result, SYSCALL_FCNTL, fd, op, arg);
     return Result;

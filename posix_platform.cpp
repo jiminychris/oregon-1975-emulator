@@ -1,11 +1,8 @@
-#include <fcntl.h>
-#include <stdarg.h>
-#include <unistd.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
-#include <poll.h>
 #include <stdlib.h>
-#include <stdio.h>
+#include <fcntl.h>
+#include <poll.h>
 
 void Exit(int rval)
 {
@@ -22,7 +19,7 @@ ssize_t Write(int fildes, const void *buf, size_t nbyte)
     return write(fildes, buf, nbyte);
 }
 
-int Open(const char *pathname, int flags, mode_t mode = 0)
+int Open(const char *pathname, int flags, mode_t mode)
 {
     return open(pathname, flags, mode);
 }
@@ -37,7 +34,7 @@ int InputOutputControl(int fd, int request, size_t arg)
     return ioctl(fd, request, arg);
 }
 
-int FileControl(int fd, int op, size_t arg = 0)
+int FileControl(int fd, int op, size_t arg)
 {
     return fcntl(fd, op, arg);
 }

@@ -23,6 +23,7 @@ extern "C" {
     }
 }
 
+#include "platform.h"
 #if 1
 #include "apple_silicon_platform.cpp"
 #else
