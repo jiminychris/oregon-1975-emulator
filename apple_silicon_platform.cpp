@@ -1,10 +1,6 @@
-#include <errno.h>
 #include <fcntl.h>
-#include <stdarg.h>
 #include <unistd.h>
-#include <stdio.h>
-#include <sys/stat.h>
-#include <sys/ttycom.h>
+#include <poll.h>
 
 #define STR_HELPER(X) #X
 #define STR(X) STR_HELPER(X)
@@ -45,7 +41,7 @@
         : "x0", "x1", "x16"                                  \
         )
 
-#define SYSCALL_3(Result, X, A, B, C)                         \
+#define SYSCALL_3(Result, X, A, B, C)                        \
     ssize_t Result;                                          \
     asm volatile (                                           \
         "mov x0, %1\n"                                       \
@@ -59,10 +55,9 @@
         : "x0", "x1", "x2", "x16"                            \
         )
 
-ssize_t Exit(int rval)
+void Exit(int rval)
 {
     SYSCALL_1(Result, SYSCALL_EXIT, rval);
-    return Result;
 }
 
 ssize_t Read(int fildes, void *buf, size_t nbyte)

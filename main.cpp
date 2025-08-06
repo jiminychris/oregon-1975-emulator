@@ -1,9 +1,5 @@
-#include <stdlib.h>
-#include <stdio.h>
-#include <ctype.h>
 #include <math.h>
 #include <time.h>
-#include <poll.h>
 
 
 #define RUN_TESTS 1
@@ -21,61 +17,6 @@
 struct print_buffer;
 ssize_t Print(print_buffer *Buffer);
 print_buffer *Newline(print_buffer *Buffer, u32 Count = 1);
-
-s32 IsPrintable(char Char)
-{
-    return 32 <= Char && Char <= 126;
-}
-
-size_t Min(size_t A, size_t B)
-{
-    return A < B ? A : B;
-}
-
-size_t Max(size_t A, size_t B)
-{
-    return A > B ? A : B;
-}
-
-s32 Min(s32 A, s32 B)
-{
-    return A < B ? A : B;
-}
-
-s32 Max(s32 A, s32 B)
-{
-    return A > B ? A : B;
-}
-
-u64 Min(u64 A, u64 B)
-{
-    return A < B ? A : B;
-}
-
-u64 Max(u64 A, u64 B)
-{
-    return A > B ? A : B;
-}
-
-r32 Min(r32 A, r32 B)
-{
-    return A < B ? A : B;
-}
-
-r32 Max(r32 A, r32 B)
-{
-    return A > B ? A : B;
-}
-
-r64 Min(r64 A, r64 B)
-{
-    return A < B ? A : B;
-}
-
-r64 Max(r64 A, r64 B)
-{
-    return A > B ? A : B;
-}
 
 struct string_reference
 {
@@ -303,7 +244,7 @@ struct print_buffer
         Print(this);
         if (FlagIsSet(Flags, print_buffer_flags_Exit))
         {
-            exit(1);
+            Exit(1);
         }
     }
 };
@@ -539,10 +480,15 @@ union r64_bits
     u64 Integer;
 };
 
+#define CUSTOM_FLOAT_PRINT 0
+#if !CUSTOM_FLOAT_PRINT
+#include <stdio.h>
+#endif
+
 size_t Append(memory_arena *Arena, r64 Real)
 {
     size_t Result = 0;
-#if 0
+#if CUSTOM_FLOAT_PRINT
 
     r64_bits Bits;
     Bits.Double = Real;
@@ -1006,24 +952,9 @@ signed char PeekChar(parser *Parser)
     return Result;
 }
 
-u32 IsEOF(parser *Parser)
+internal inline int IsEOF(parser *Parser)
 {
     return PeekChar(Parser) < 0;
-}
-
-u32 IsUpperOrDigit(s8 Char)
-{
-    return isdigit(Char) || isupper(Char);
-}
-
-u32 IsWhitespace(s8 Char)
-{
-    return Char == ' ' || Char == '\n' || Char == '\r' || Char == '\t';
-}
-
-u32 IsIntralineWhitespace(s8 Char)
-{
-    return Char == ' ' || Char == '\t';
 }
 
 size_t SkipIntralineWhitespace(parser *Parser)
@@ -1175,7 +1106,7 @@ lexeme *LexNumber(parser *Parser)
 {
     s32 Integer = 0;
     lexeme *Lexeme;
-    while (isdigit(PeekChar(Parser)))
+    while (IsDigit(PeekChar(Parser)))
     {
         Integer = 10 * Integer + GetChar(Parser) - '0';
     }
@@ -1184,7 +1115,7 @@ lexeme *LexNumber(parser *Parser)
         GetChar(Parser);
         r32 Real = Integer;
         r32 Multiplier = 0.1f;
-        while (isdigit(PeekChar(Parser)))
+        while (IsDigit(PeekChar(Parser)))
         {
             Real += Multiplier * (GetChar(Parser) - '0');
             Multiplier *= 0.1f;
@@ -1206,7 +1137,7 @@ lexeme *LexCharacter(parser *Parser)
     memory_arena *Arena = &Parser->StringArena;
     lexeme *Lexeme = PreviousLexeme(Parser);
     char Char = 0;
-    while (isdigit(PeekChar(Parser)))
+    while (IsDigit(PeekChar(Parser)))
     {
         Char = 10 * Char + GetChar(Parser) - '0';
     }
@@ -1307,7 +1238,7 @@ lexeme *LexAlpha(parser *Parser)
     STRING_BUILDER(Builder, 1024);
     signed char Char = PeekChar(Parser);
 
-    while (isalpha(Char) || isdigit(Char) || Char == '_')
+    while (IsAlpha(Char) || IsDigit(Char) || Char == '_')
     {
         Append(&Builder, GetChar(Parser));
         Char = PeekChar(Parser);
@@ -1463,12 +1394,12 @@ void Lex(parser *Parser)
             } break;
             default:
             {
-                if (isdigit(Char) || Char == '.')
+                if (IsDigit(Char) || Char == '.')
                 {
                     UngetChar(Parser);
                     LexNumber(Parser);
                 }
-                else if (isalpha(Char))
+                else if (IsAlpha(Char))
                 {
                     UngetChar(Parser);
                     LexAlpha(Parser);
@@ -2821,7 +2752,7 @@ void EvaluateInput(environment *Environment, lexeme *Lexeme)
             s32 Integer = 0;
             s32 Multiplier = 1;
             Char = GetChar(Environment);
-            while (!(Char == '-' || Char == '\n' || isdigit(Char)))
+            while (!(Char == '-' || Char == '\n' || IsDigit(Char)))
             {
                 Char = GetChar(Environment);
             }
@@ -2830,7 +2761,7 @@ void EvaluateInput(environment *Environment, lexeme *Lexeme)
                 Multiplier = -1;
                 Char = GetChar(Environment);
             }
-            while (isdigit(Char))
+            while (IsDigit(Char))
             {
                 Again = 0;
                 Integer = 10 * Integer + Char - '0';

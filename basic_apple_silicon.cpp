@@ -1,4 +1,3 @@
-#include <stddef.h>
 #include "primitives.h"
 
 extern "C" {
@@ -24,7 +23,11 @@ extern "C" {
     }
 }
 
-#include "basic_apple_silicon_platform.cpp"
-#include "common.cpp"
+#if 1
+#include "apple_silicon_platform.cpp"
+#else
+#include "posix_platform.cpp"
+#endif
 
+#include "common.cpp"
 #include "main.cpp"

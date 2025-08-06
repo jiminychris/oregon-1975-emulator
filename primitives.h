@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <stdint.h>
 
 #define u8 uint8_t
@@ -12,3 +13,7 @@
 
 #define r32 float
 #define r64 double
+
+#define EOF -1
+
+#define internal static
